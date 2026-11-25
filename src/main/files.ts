@@ -57,6 +57,6 @@ export async function importFile(filePath: string, win: BrowserWindow): Promise<
     fileName: basename(filePath),
     sentAt: Date.now()
   }
-  await deliverContentToWindow(win, payload)
+  deliverContentToWindow(win, payload)
   return text
 }

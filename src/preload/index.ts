@@ -48,12 +48,6 @@ contextBridge.exposeInMainWorld('api', {
   windowApply: (payload: WindowApplyPayload): Promise<void> =>
     ipcRenderer.invoke(IPC.windowApply, payload),
 
-  openNewWindow: (payload?: ContentIncomingPayload): Promise<void> =>
-    ipcRenderer.invoke(IPC.windowNew, payload),
-
-  consumeInitialContent: (): Promise<ContentIncomingPayload | null> =>
-    ipcRenderer.invoke(IPC.consumeInitialContent),
-
   // ── Fire-and-forget ──────────────────────────────────────────
   metricsEnabled: (): Promise<boolean> =>
     ipcRenderer.invoke(IPC.metricsEnabled),

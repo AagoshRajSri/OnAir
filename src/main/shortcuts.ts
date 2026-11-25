@@ -4,7 +4,7 @@ import { IPC } from '../shared/types'
 import { loadSettings } from './storage'
 import { importFromClipboard } from './clipboard'
 import { metrics } from './metrics'
-import { getAllWindows, getTargetWindow } from './window'
+import { getMainWindow } from './window'
 
 let registeredKeys: string[] = []
 let currentConflicts: ShortcutId[] = []
@@ -18,7 +18,7 @@ export async function registerShortcuts(): Promise<ShortcutId[]> {
   const settings = await loadSettings()
 
   const sendCommand = (cmd: ShortcutId): void => {
-    const win = getTargetWindow()
+    const win = getMainWindow()
     if (win && !win.isDestroyed()) {
       win.webContents.send(IPC.command, cmd)
     }
@@ -26,19 +26,19 @@ export async function registerShortcuts(): Promise<ShortcutId[]> {
 
   const shortcutMap: Record<ShortcutId, () => void> = {
     toggleWindow: () => {
-      const windows = getAllWindows()
-      const anyVisible = windows.some((w) => w.isVisible())
-      if (anyVisible) {
-        for (const w of windows) w.hide()
-      } else if (windows.length > 0) {
+      const win = getMainWindow()
+      if (!win || win.isDestroyed()) return
+      if (win.isVisible()) {
+        win.hide()
+      } else {
         metrics.start('show-window')
-        for (const w of windows) w.show()
+        win.show()
       }
     },
     importClipboard: () => {
-      const win = getTargetWindow()
+      const win = getMainWindow()
       if (win && !win.isDestroyed()) {
-        importFromClipboard(win).catch(console.error)
+        importFromClipboard(win)
       }
     },
     fontUp: () => sendCommand('fontUp'),

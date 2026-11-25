@@ -37,7 +37,6 @@ export interface Settings {
   autoScrollSpeed: number // 10 to 400
   clipboardWatch: boolean
   saveWatchedToHistory: boolean
-  openInNewWindow: boolean
   pageMode: boolean
   bounds: { x: number; y: number; width: number; height: number } | null
   shortcuts: Record<ShortcutId, string>
@@ -61,7 +60,6 @@ export const DEFAULT_SETTINGS: Settings = {
   autoScrollSpeed: 60,
   clipboardWatch: false,
   saveWatchedToHistory: false,
-  openInNewWindow: false,
   pageMode: true,
   bounds: null,
   shortcuts: {
@@ -105,8 +103,6 @@ export const IPC = {
   command: 'command',
   toast: 'toast',
   windowApply: 'window:apply',
-  windowNew: 'window:new',
-  consumeInitialContent: 'content:consume-initial',
   settingsUpdated: 'settings:updated',
   metricsMark: 'metrics:mark',
   metricsEnabled: 'metrics:enabled'

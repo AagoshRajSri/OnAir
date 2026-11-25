@@ -8,44 +8,10 @@ import type { Settings, WindowApplyPayload, ContentIncomingPayload } from '../sh
 import { IPC } from '../shared/types'
 
 let boundsTimer: ReturnType<typeof setTimeout> | null = null
+let mainWin: BrowserWindow | null = null
 
-const openWindows = new Set<BrowserWindow>()
-let lastFocusedWindow: BrowserWindow | null = null
-const pendingInitialContent = new Map<number, ContentIncomingPayload>()
-const windowHasContent = new Map<number, boolean>()
-
-export function getAllWindows(): BrowserWindow[] {
-  return [...openWindows].filter((w) => !w.isDestroyed())
-}
-
-export function getTargetWindow(): BrowserWindow | null {
-  const focused = BrowserWindow.getFocusedWindow()
-  if (focused && !focused.isDestroyed() && openWindows.has(focused)) {
-    return focused
-  }
-  if (lastFocusedWindow && !lastFocusedWindow.isDestroyed()) {
-    return lastFocusedWindow
-  }
-  return getAllWindows()[0] ?? null
-}
-
-export function consumeInitialContent(webContentsId: number): ContentIncomingPayload | null {
-  const payload = pendingInitialContent.get(webContentsId) ?? null
-  if (payload) {
-    pendingInitialContent.delete(webContentsId)
-    windowHasContent.set(webContentsId, true)
-  }
-  return payload
-}
-
-export function markWindowHasContent(webContentsId: number, hasContent: boolean): void {
-  windowHasContent.set(webContentsId, hasContent)
-}
-
-export function broadcastSettingsUpdated(settings: Settings): void {
-  for (const w of getAllWindows()) {
-    w.webContents.send(IPC.settingsUpdated, settings)
-  }
+export function getMainWindow(): BrowserWindow | null {
+  return mainWin && !mainWin.isDestroyed() ? mainWin : null
 }
 
 function getValidBounds(saved: Settings['bounds']): Rectangle {
@@ -74,18 +40,6 @@ function getValidBounds(saved: Settings['bounds']): Rectangle {
   }
 }
 
-function getCascadedBounds(refWin: BrowserWindow): Rectangle {
-  const ref = refWin.getNormalBounds()
-  const display = screen.getDisplayMatching(ref)
-  const wa = display.workArea
-  const step = 32
-  let x = ref.x + step
-  let y = ref.y + step
-  if (x + ref.width > wa.x + wa.width) x = wa.x + 24
-  if (y + ref.height > wa.y + wa.height) y = wa.y + 24
-  return { x, y, width: ref.width, height: ref.height }
-}
-
 function getAppIcon(): Electron.NativeImage | undefined {
   const candidates = [
     join(app.getAppPath(), 'build/icon.png'),
@@ -98,19 +52,9 @@ function getAppIcon(): Electron.NativeImage | undefined {
   return undefined
 }
 
-export interface CreateWindowOptions {
-  initialContent?: ContentIncomingPayload
-  offsetFrom?: BrowserWindow | null
-}
-
-export async function createReaderWindow(
-  options: CreateWindowOptions = {}
-): Promise<BrowserWindow> {
+export async function createReaderWindow(): Promise<BrowserWindow> {
   const settings = await loadSettings()
-  const bounds =
-    options.offsetFrom && !options.offsetFrom.isDestroyed()
-      ? getCascadedBounds(options.offsetFrom)
-      : getValidBounds(settings.bounds)
+  const bounds = getValidBounds(settings.bounds)
 
   const win = new BrowserWindow({
     x: bounds.x,
@@ -124,7 +68,7 @@ export async function createReaderWindow(
     transparent: false,
     resizable: !settings.locked,
     movable: !settings.locked,
-    alwaysOnTop: settings.alwaysOnTop,
+    alwaysOnTop: settings.alwaysOnTop || settings.locked,
     show: false,
     backgroundColor: '#0f1115',
     webPreferences: {
@@ -135,18 +79,9 @@ export async function createReaderWindow(
     }
   })
 
-  openWindows.add(win)
-  lastFocusedWindow = win
-  const wcId = win.webContents.id
+  mainWin = win
 
-  if (options.initialContent) {
-    pendingInitialContent.set(wcId, options.initialContent)
-    windowHasContent.set(wcId, true)
-  } else {
-    windowHasContent.set(wcId, false)
-  }
-
-  if (settings.alwaysOnTop) {
+  if (settings.alwaysOnTop || settings.locked) {
     win.setAlwaysOnTop(true, 'screen-saver')
   }
 
@@ -162,17 +97,21 @@ export async function createReaderWindow(
     metrics.end('show-window')
   })
 
-  win.on('focus', () => {
-    lastFocusedWindow = win
+  // Keep locked / always-on-top window pinned above other applications when focus moves elsewhere
+  win.on('blur', async () => {
+    try {
+      if (win.isDestroyed()) return
+      const s = await loadSettings()
+      if ((s.alwaysOnTop || s.locked) && win.isVisible()) {
+        win.setAlwaysOnTop(true, 'screen-saver')
+      }
+    } catch {
+      /* ignore */
+    }
   })
 
   win.on('closed', () => {
-    openWindows.delete(win)
-    pendingInitialContent.delete(wcId)
-    windowHasContent.delete(wcId)
-    if (lastFocusedWindow === win) {
-      lastFocusedWindow = getAllWindows()[0] ?? null
-    }
+    if (mainWin === win) mainWin = null
   })
 
   const handleBoundsChange = (): void => {
@@ -215,29 +154,13 @@ export async function createReaderWindow(
         click: () => importFromClipboard(win)
       },
       {
-        label: 'New window',
-        click: () => {
-          createReaderWindow({ offsetFrom: win }).catch(console.error)
-        }
-      },
-      {
-        label: 'Open copy/paste in new window',
-        type: 'checkbox',
-        checked: s.openInNewWindow,
-        click: async (item) => {
-          const updated: Settings = { ...s, openInNewWindow: item.checked }
-          await saveSettings(updated)
-          broadcastSettingsUpdated(updated)
-        }
-      },
-      {
         label: 'Page-by-page view',
         type: 'checkbox',
         checked: s.pageMode,
         click: async (item) => {
           const updated: Settings = { ...s, pageMode: item.checked }
           await saveSettings(updated)
-          broadcastSettingsUpdated(updated)
+          win.webContents.send(IPC.settingsUpdated, updated)
         }
       },
       { type: 'separator' },
@@ -252,7 +175,7 @@ export async function createReaderWindow(
           const updated: Settings = { ...s, alwaysOnTop: next }
           await saveSettings(updated)
           applyWindowSettings(win, { alwaysOnTop: next })
-          broadcastSettingsUpdated(updated)
+          win.webContents.send(IPC.settingsUpdated, updated)
         }
       },
       { type: 'separator' },
@@ -277,23 +200,13 @@ export async function createReaderWindow(
   return win
 }
 
-export async function deliverContentToWindow(
-  sourceWin: BrowserWindow | null,
+export function deliverContentToWindow(
+  win: BrowserWindow | null,
   payload: ContentIncomingPayload
-): Promise<void> {
-  const settings = await loadSettings()
-  const target = sourceWin && !sourceWin.isDestroyed() ? sourceWin : getTargetWindow()
-
-  if (settings.openInNewWindow && target && windowHasContent.get(target.webContents.id)) {
-    await createReaderWindow({ initialContent: payload, offsetFrom: target })
-    return
-  }
-
+): void {
+  const target = win && !win.isDestroyed() ? win : getMainWindow()
   if (target && !target.isDestroyed()) {
-    windowHasContent.set(target.webContents.id, true)
     target.webContents.send(IPC.contentIncoming, payload)
-  } else {
-    await createReaderWindow({ initialContent: payload })
   }
 }
 
@@ -321,6 +234,9 @@ export function applyWindowSettings(win: BrowserWindow, payload: WindowApplyPayl
   if (payload.locked !== undefined) {
     win.setMovable(!payload.locked)
     win.setResizable(!payload.locked)
+    if (payload.locked) {
+      win.setAlwaysOnTop(true, 'screen-saver')
+    }
   }
 
   if (payload.sizePreset) {

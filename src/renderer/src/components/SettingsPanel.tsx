@@ -7,6 +7,8 @@ interface SettingsPanelProps {
   onChange: (patch: Partial<Settings>) => void
   onClose: () => void
   onSelectSession: (id: string) => Promise<void>
+  onDeleteSession: (id: string) => void
+  onClearSessions: () => void
   showToast: (msg: string) => void
 }
 
@@ -60,6 +62,8 @@ export default function SettingsPanel({
   onChange,
   onClose,
   onSelectSession,
+  onDeleteSession,
+  onClearSessions,
   showToast
 }: SettingsPanelProps): ReactElement {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -372,8 +376,8 @@ export default function SettingsPanel({
               checked={settings.locked}
               onChange={(e) => {
                 const val = e.target.checked
-                onChange({ locked: val })
-                window.api.windowApply({ locked: val })
+                onChange({ locked: val, ...(val ? { alwaysOnTop: true } : {}) })
+                window.api.windowApply({ locked: val, ...(val ? { alwaysOnTop: true } : {}) })
               }}
             />
           </div>
@@ -423,25 +427,11 @@ export default function SettingsPanel({
               >
                 Wide (900×360)
               </button>
-              <button
-                onClick={() => window.api.openNewWindow()}
-                style={{
-                  background: '#2a2d35',
-                  border: 'none',
-                  color: '#e6e8ec',
-                  cursor: 'pointer',
-                  borderRadius: 3,
-                  padding: '3px 8px',
-                  fontSize: 11
-                }}
-              >
-                + New window
-              </button>
             </div>
           </div>
         </div>
 
-        {/* Auto-scroll */}
+        {/* Reading & Auto-scroll */}
         <div className="section">
           <h2>Reading & Auto-scroll</h2>
           <div className="row">
@@ -472,17 +462,6 @@ export default function SettingsPanel({
         {/* Clipboard */}
         <div className="section">
           <h2>Clipboard</h2>
-          <div className="row">
-            <span>Open copy/paste in new window</span>
-            <input
-              type="checkbox"
-              checked={settings.openInNewWindow}
-              onChange={(e) => onChange({ openInNewWindow: e.target.checked })}
-            />
-          </div>
-          <div style={{ opacity: 0.65, fontSize: 10, marginBottom: 8, lineHeight: 1.3 }}>
-            When on, pasting (Ctrl+V / Ctrl+Alt+V) or importing opens a new floating window instead of replacing the current text.
-          </div>
           <div className="row">
             <span>Monitor clipboard</span>
             <input
@@ -582,6 +561,7 @@ export default function SettingsPanel({
                 onClick={async () => {
                   await window.api.sessionDelete(s.id)
                   setSessions((prev) => prev.filter((item) => item.id !== s.id))
+                  onDeleteSession(s.id)
                 }}
                 title="Delete session"
                 style={{
@@ -625,6 +605,7 @@ export default function SettingsPanel({
                         await window.api.sessionsClear()
                         setSessions([])
                         setConfirmClear(false)
+                        onClearSessions()
                       }}
                       style={{
                         background: '#ff4444',

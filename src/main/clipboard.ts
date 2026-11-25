@@ -10,7 +10,7 @@ const MAX_CHARS = 500_000
 let watchInterval: ReturnType<typeof setInterval> | null = null
 let lastClipboard = ''
 
-export async function importFromClipboard(win: BrowserWindow): Promise<void> {
+export function importFromClipboard(win: BrowserWindow): void {
   if (win.isDestroyed()) return
 
   metrics.start('clipboard-transfer')
@@ -34,7 +34,7 @@ export async function importFromClipboard(win: BrowserWindow): Promise<void> {
     source: 'clipboard-hotkey',
     sentAt: metrics.now()
   }
-  await deliverContentToWindow(win, payload)
+  deliverContentToWindow(win, payload)
 }
 
 export function startClipboardWatcher(getTarget: () => BrowserWindow | null): void {
@@ -65,7 +65,7 @@ export function startClipboardWatcher(getTarget: () => BrowserWindow | null): vo
       source: 'clipboard-watch',
       sentAt: metrics.now()
     }
-    deliverContentToWindow(target, payload).catch(console.error)
+    deliverContentToWindow(target, payload)
   }, 500)
 }
 

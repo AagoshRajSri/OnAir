@@ -29,8 +29,6 @@ declare global {
       clipboardImport: () => Promise<void>
       shortcutsConflicts: () => Promise<ShortcutId[]>
       windowApply: (payload: WindowApplyPayload) => Promise<void>
-      openNewWindow: (payload?: ContentIncomingPayload) => Promise<void>
-      consumeInitialContent: () => Promise<ContentIncomingPayload | null>
       metricsEnabled: () => Promise<boolean>
       metricsMark: (payload: MetricsMarkPayload) => void
       onContentIncoming: (cb: (payload: ContentIncomingPayload) => void) => () => void
@@ -48,6 +46,12 @@ function makeTitle(text: string): string {
   return cleaned.slice(0, 40)
 }
 
+function newUuid(): string {
+  return crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
 function normalizeDropText(text: string): string {
   return text
     .replace(/\r\n/g, '\n')
@@ -58,19 +62,10 @@ function normalizeDropText(text: string): string {
     .trim()
 }
 
-// Module-level guard so React StrictMode double-mount never loses pending initial content
-let initialContentPromise: Promise<ContentIncomingPayload | null> | null = null
-function getInitialContentOnce(): Promise<ContentIncomingPayload | null> {
-  if (!initialContentPromise) {
-    initialContentPromise = window.api.consumeInitialContent()
-  }
-  return initialContentPromise
-}
-
 export default function App(): ReactElement {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
-  const [text, setText] = useState('')
-  const [currentSession, setCurrentSession] = useState<Session | null>(null)
+  const [tabs, setTabs] = useState<Session[]>([])
+  const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -83,26 +78,58 @@ export default function App(): ReactElement {
   const sentenceSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cmdSeq = useRef(0)
 
+  const currentSession = tabs.find((t) => t.id === activeTabId) ?? null
+  const text = currentSession?.text ?? ''
+
   const showToast = useCallback((msg: string) => {
     setToast(msg)
     if (toastTimer.current) clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToast(null), 2000)
   }, [])
 
-  // Handle incoming content from main process (hotkey, watcher, file, or drop-text)
+  // Load initial settings, metrics flag, and newest session as first tab
+  useEffect(() => {
+    if (!window.api) return
+    let cancelled = false
+
+    ;(async () => {
+      const [metricsOn, loadedSettings, list] = await Promise.all([
+        window.api.metricsEnabled(),
+        window.api.settingsGet(),
+        window.api.sessionsList()
+      ])
+      if (cancelled) return
+
+      setScrollMetricsEnabled(metricsOn)
+      setSettings(loadedSettings)
+      applySettingsToDOM(loadedSettings)
+
+      if (list.length > 0) {
+        const newest = list[0]
+        setTabs([newest])
+        setActiveTabId(newest.id)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Window resize handler for toolbar and tab bar visibility
+  useEffect(() => {
+    const handleResize = (): void => setWindowHeight(window.innerHeight)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  // Handle incoming content: open in a new tab of the single main window
   const handleNewContent = useCallback(
-    (payload: ContentIncomingPayload, overrideSaveWatched?: boolean) => {
+    (payload: ContentIncomingPayload) => {
       const receiveTime = performance.timeOrigin + performance.now()
 
-      setCurrentSession((prev) => {
-        if (prev) setPreviousSessionId(prev.id)
-        return prev
-      })
-
       const newSession: Session = {
-        id: crypto.randomUUID
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        id: newUuid(),
         title: payload.fileName ? payload.fileName.slice(0, 40) : makeTitle(payload.text),
         source: payload.source,
         fileName: payload.fileName,
@@ -112,11 +139,22 @@ export default function App(): ReactElement {
         updatedAt: Date.now()
       }
 
-      setCurrentSession(newSession)
-      setText(payload.text)
+      setTabs((prevTabs) => {
+        const current = prevTabs.find((t) => t.id === activeTabId)
+        if (current && current.text === '') {
+          // Replace blank untitled tab rather than leaving an empty tab behind
+          return prevTabs.map((t) => (t.id === current.id ? newSession : t))
+        }
+        return [...prevTabs, newSession]
+      })
+      if (activeTabId) {
+        setPreviousSessionId(activeTabId)
+      }
+      setActiveTabId(newSession.id)
+      setIsEditing(false)
 
-      const shouldSaveWatched = overrideSaveWatched ?? settings.saveWatchedToHistory
-      if (payload.source !== 'clipboard-watch' || shouldSaveWatched) {
+      // Watcher imports kept in memory only unless saveWatchedToHistory is true
+      if (payload.source !== 'clipboard-watch' || settings.saveWatchedToHistory) {
         window.api.sessionSave(newSession)
       }
 
@@ -138,53 +176,32 @@ export default function App(): ReactElement {
         })
       })
     },
-    [settings.saveWatchedToHistory]
+    [activeTabId, settings.saveWatchedToHistory]
   )
 
-  // Load initial settings, metrics flag, and either pending new-window content or newest session
-  useEffect(() => {
-    if (!window.api) return
-    let cancelled = false
-
-    ;(async () => {
-      const [metricsOn, loadedSettings, initialPayload] = await Promise.all([
-        window.api.metricsEnabled(),
-        window.api.settingsGet(),
-        getInitialContentOnce()
-      ])
-      if (cancelled) return
-
-      setScrollMetricsEnabled(metricsOn)
-      setSettings(loadedSettings)
-      applySettingsToDOM(loadedSettings)
-
-      if (initialPayload) {
-        handleNewContent(initialPayload, loadedSettings.saveWatchedToHistory)
-      } else {
-        const list = await window.api.sessionsList()
-        if (!cancelled && list.length > 0) {
-          const newest = list[0]
-          setCurrentSession(newest)
-          setText(newest.text)
-        }
+  const openSessionInTabs = useCallback(
+    (session: Session) => {
+      if (activeTabId && activeTabId !== session.id) {
+        setPreviousSessionId(activeTabId)
       }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  // Window resize handler for toolbar visibility
-  useEffect(() => {
-    const handleResize = (): void => setWindowHeight(window.innerHeight)
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
+      setTabs((prev) => {
+        const exists = prev.some((t) => t.id === session.id)
+        return exists ? prev.map((t) => (t.id === session.id ? session : t)) : [...prev, session]
+      })
+      setActiveTabId(session.id)
+      setIsEditing(false)
+    },
+    [activeTabId]
+  )
 
   const handleBack = useCallback(async (): Promise<void> => {
     if (!previousSessionId) {
       showToast('No previous text.')
+      return
+    }
+    const existingTab = tabs.find((t) => t.id === previousSessionId)
+    if (existingTab) {
+      openSessionInTabs(existingTab)
       return
     }
     const session = await window.api.sessionLoad(previousSessionId)
@@ -192,11 +209,8 @@ export default function App(): ReactElement {
       showToast('No previous text.')
       return
     }
-    const oldCurrentId = currentSession?.id ?? null
-    setPreviousSessionId(oldCurrentId)
-    setCurrentSession(session)
-    setText(session.text)
-  }, [previousSessionId, currentSession, showToast])
+    openSessionInTabs(session)
+  }, [previousSessionId, tabs, openSessionInTabs, showToast])
 
   const handleSettingsChange = useCallback(
     async (patch: Partial<Settings>): Promise<void> => {
@@ -213,6 +227,14 @@ export default function App(): ReactElement {
     },
     [settings]
   )
+
+  const handleToggleLock = useCallback(() => {
+    const nextLocked = !settings.locked
+    handleSettingsChange({
+      locked: nextLocked,
+      ...(nextLocked ? { alwaysOnTop: true } : {})
+    })
+  }, [settings.locked, handleSettingsChange])
 
   const handleOpenFile = async (): Promise<void> => {
     const filePath = await window.api.fileOpenDialog()
@@ -232,7 +254,7 @@ export default function App(): ReactElement {
           setShowSettings((v) => !v)
           break
         case 'toggleLock':
-          handleSettingsChange({ locked: !settings.locked })
+          handleToggleLock()
           break
         case 'back':
           handleBack()
@@ -253,13 +275,13 @@ export default function App(): ReactElement {
           break
       }
     },
-    [settings, handleSettingsChange, handleBack]
+    [settings.fontSize, handleToggleLock, handleSettingsChange, handleBack]
   )
 
   // Register push listeners
   useEffect(() => {
     if (!window.api) return
-    const unContent = window.api.onContentIncoming((payload) => handleNewContent(payload))
+    const unContent = window.api.onContentIncoming(handleNewContent)
     const unCommand = window.api.onCommand(handleCommand)
     const unToast = window.api.onToast((msg) => showToast(msg))
     const unSettings = window.api.onSettingsUpdated((updated) => {
@@ -275,7 +297,7 @@ export default function App(): ReactElement {
     }
   }, [handleNewContent, handleCommand, showToast])
 
-  // Local keydowns: Ctrl+E (Edit) and Ctrl+V (Paste clipboard import when not editing)
+  // Local keydowns: Ctrl+E (Edit) and Ctrl+V (Paste into new tab when not editing)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'e' || e.key === 'E')) {
@@ -305,12 +327,11 @@ export default function App(): ReactElement {
           title: makeTitle(normalized),
           updatedAt: Date.now()
         }
-        setCurrentSession(updated)
-        setText(normalized)
+        setTabs((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
         await window.api.sessionSave(updated)
       } else {
         const newSession: Session = {
-          id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
+          id: newUuid(),
           title: makeTitle(normalized),
           source: 'typed',
           text: normalized,
@@ -318,8 +339,8 @@ export default function App(): ReactElement {
           createdAt: Date.now(),
           updatedAt: Date.now()
         }
-        setCurrentSession(newSession)
-        setText(normalized)
+        setTabs((prev) => [...prev, newSession])
+        setActiveTabId(newSession.id)
         await window.api.sessionSave(newSession)
       }
     },
@@ -331,7 +352,7 @@ export default function App(): ReactElement {
     (index: number): void => {
       if (!currentSession) return
       const updated = { ...currentSession, sentenceIndex: index, updatedAt: Date.now() }
-      setCurrentSession(updated)
+      setTabs((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
 
       if (updated.source === 'clipboard-watch' && !settings.saveWatchedToHistory) {
         return
@@ -344,6 +365,38 @@ export default function App(): ReactElement {
     },
     [currentSession, settings.saveWatchedToHistory]
   )
+
+  const handleCloseTab = useCallback(
+    (tabId: string) => {
+      setTabs((prev) => {
+        const idx = prev.findIndex((t) => t.id === tabId)
+        const nextTabs = prev.filter((t) => t.id !== tabId)
+        if (activeTabId === tabId) {
+          const fallback = nextTabs[Math.min(idx, nextTabs.length - 1)] ?? null
+          setActiveTabId(fallback?.id ?? null)
+          setIsEditing(false)
+        }
+        return nextTabs
+      })
+    },
+    [activeTabId]
+  )
+
+  const handleNewBlankTab = useCallback(() => {
+    const blank: Session = {
+      id: newUuid(),
+      title: 'New tab',
+      source: 'typed',
+      text: '',
+      sentenceIndex: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }
+    if (activeTabId) setPreviousSessionId(activeTabId)
+    setTabs((prev) => [...prev, blank])
+    setActiveTabId(blank.id)
+    setIsEditing(false)
+  }, [activeTabId])
 
   // Drag and drop handlers
   const handleDrop = useCallback(
@@ -369,19 +422,14 @@ export default function App(): ReactElement {
       if (dropText) {
         const cleaned = normalizeDropText(dropText)
         if (!cleaned) return
-        const payload: ContentIncomingPayload = {
+        handleNewContent({
           text: cleaned,
           source: 'drop-text',
           sentAt: performance.timeOrigin + performance.now()
-        }
-        if (settings.openInNewWindow && text) {
-          await window.api.openNewWindow(payload)
-        } else {
-          handleNewContent(payload)
-        }
+        })
       }
     },
-    [handleNewContent, settings.openInNewWindow, showToast, text]
+    [handleNewContent, showToast]
   )
 
   const handleDragOver = useCallback((e: React.DragEvent): void => {
@@ -444,12 +492,58 @@ export default function App(): ReactElement {
       {/* 28px toolbar row below drag strip, visible on hover when height >= 100 */}
       {showToolbar && windowHeight >= 100 && !isEditing && (
         <Toolbar
+          locked={settings.locked}
           onOpenFile={handleOpenFile}
           onImportClipboard={() => window.api.clipboardImport()}
           onEdit={() => setIsEditing(true)}
+          onToggleLock={handleToggleLock}
           onSettings={() => setShowSettings((v) => !v)}
           onHide={() => window.api.windowApply({ hidden: true })}
         />
+      )}
+
+      {/* Tab strip for switching between multiple pasted/imported texts in one window */}
+      {tabs.length > 0 && windowHeight >= 100 && !isEditing && (
+        <div className="tab-bar">
+          {tabs.map((tab) => {
+            const isActive = tab.id === activeTabId
+            return (
+              <div
+                key={tab.id}
+                className={`tab-item${isActive ? ' active' : ''}`}
+                onClick={() => {
+                  if (tab.id !== activeTabId) {
+                    if (activeTabId) setPreviousSessionId(activeTabId)
+                    setActiveTabId(tab.id)
+                  }
+                }}
+                title={tab.title || 'Untitled'}
+              >
+                <span className="tab-title">{tab.title || 'Untitled'}</span>
+                <button
+                  type="button"
+                  className="tab-close"
+                  aria-label="Close tab"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleCloseTab(tab.id)
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
+          <button
+            type="button"
+            className="tab-add"
+            title="New tab"
+            aria-label="New tab"
+            onClick={handleNewBlankTab}
+          >
+            +
+          </button>
+        </div>
       )}
 
       {/* Reader or edit textarea */}
@@ -487,11 +581,13 @@ export default function App(): ReactElement {
           showToast={showToast}
           onSelectSession={async (id) => {
             const s = await window.api.sessionLoad(id)
-            if (s) {
-              if (currentSession) setPreviousSessionId(currentSession.id)
-              setCurrentSession(s)
-              setText(s.text)
-            }
+            if (s) openSessionInTabs(s)
+          }}
+          onDeleteSession={(id) => handleCloseTab(id)}
+          onClearSessions={() => {
+            setTabs([])
+            setActiveTabId(null)
+            setPreviousSessionId(null)
           }}
         />
       )}
