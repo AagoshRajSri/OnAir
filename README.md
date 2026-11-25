@@ -97,3 +97,24 @@ npm start
 ```
 Timestamps and durations are recorded to `latency-results.csv` in the app's `userData` folder.
 
+---
+
+## Phase 1 Benchmark Report
+
+### Clipboard Transfer Performance
+
+Measured the end-to-end latency from clipboard hotkey activation (`Ctrl + Alt + V`) to content rendering in the Electron application.
+
+| Metric | Result |
+|---|---:|
+| Number of trials | 226 |
+| Average latency | 14.474 ms |
+| Median latency | 14.445 ms |
+| P95 latency | 24.333 ms |
+| Minimum latency | 2.689 ms |
+| Maximum latency | 38.611 ms |
+
+**Measurement methodology:** Instrumented the Electron main process and renderer using high-resolution performance timestamps. The completion marker is recorded after two consecutive animation frames.
+
+**Result:** Median clipboard-to-render latency of approximately 14.45 ms across 226 trials.
+
