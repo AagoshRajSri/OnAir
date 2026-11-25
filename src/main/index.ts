@@ -14,8 +14,7 @@ nativeTheme.themeSource = 'dark'
 app.whenReady().then(async () => {
   await pruneSessions()
   const settings = await loadSettings()
-  const win = await createReaderWindow()
-  setupIpc(win)
+  const win = await createReaderWindow((w) => setupIpc(w))
   await registerShortcuts(win)
 
   if (settings.clipboardWatch) {

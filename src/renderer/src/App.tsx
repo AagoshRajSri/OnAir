@@ -79,6 +79,7 @@ export default function App(): ReactElement {
 
   // Load initial settings, metrics flag, and newest session
   useEffect(() => {
+    if (!window.api) return
     window.api.metricsEnabled().then(setScrollMetricsEnabled)
     window.api.settingsGet().then((s) => {
       setSettings(s)
@@ -227,6 +228,7 @@ export default function App(): ReactElement {
 
   // Register push listeners
   useEffect(() => {
+    if (!window.api) return
     const unContent = window.api.onContentIncoming(handleNewContent)
     const unCommand = window.api.onCommand(handleCommand)
     const unToast = window.api.onToast((msg) => showToast(msg))
@@ -343,6 +345,27 @@ export default function App(): ReactElement {
   const handleDragLeave = useCallback((): void => {
     setIsDraggingOver(false)
   }, [])
+
+  if (!window.api) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100vh',
+          padding: 24,
+          background: '#0f1115',
+          color: '#e6e8ec',
+          fontFamily: '"Segoe UI", sans-serif',
+          fontSize: 14,
+          textAlign: 'center'
+        }}
+      >
+        OnAir runs inside the Electron desktop window (window.api preload bridge is unavailable in a standard browser tab).
+      </div>
+    )
+  }
 
   return (
     <div

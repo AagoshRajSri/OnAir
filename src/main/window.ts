@@ -36,7 +36,9 @@ function getValidBounds(saved: Settings['bounds']): Rectangle {
   }
 }
 
-export async function createReaderWindow(): Promise<BrowserWindow> {
+export async function createReaderWindow(
+  beforeLoad?: (win: BrowserWindow) => void
+): Promise<BrowserWindow> {
   const settings = await loadSettings()
   const bounds = getValidBounds(settings.bounds)
 
@@ -148,6 +150,8 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
     ])
     menu.popup({ window: win })
   })
+
+  beforeLoad?.(win)
 
   // Load renderer
   if (process.env['ELECTRON_RENDERER_URL']) {
