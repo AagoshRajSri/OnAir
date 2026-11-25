@@ -28,7 +28,6 @@ export async function registerShortcuts(win: BrowserWindow): Promise<ShortcutId[
     },
     importClipboard: () => {
       if (win.isDestroyed()) return
-      metrics.start('clipboard-transfer')
       importFromClipboard(win)
     },
     fontUp: () => {

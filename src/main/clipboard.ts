@@ -11,6 +11,9 @@ let lastClipboard = ''
 
 export function importFromClipboard(win: BrowserWindow): void {
   if (win.isDestroyed()) return
+
+  metrics.start('clipboard-transfer')
+
   const raw = clipboard.readText()
 
   if (!raw || raw.trim().length === 0) {
