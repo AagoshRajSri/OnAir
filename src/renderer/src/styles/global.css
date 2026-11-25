@@ -44,6 +44,31 @@ body,
   flex-shrink: 0;
 }
 
+/* Dedicated top-right corner drag handle (inset 5px so OS resize corner remains free) */
+.corner-drag-handle {
+  -webkit-app-region: drag;
+  position: fixed;
+  top: 5px;
+  right: 5px;
+  width: 26px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--text-color);
+  background: color-mix(in srgb, var(--text-color) 10%, transparent);
+  opacity: 0.55;
+  z-index: 60;
+  cursor: grab;
+  user-select: none;
+}
+
+.corner-drag-handle:hover {
+  opacity: 0.95;
+  background: color-mix(in srgb, var(--text-color) 18%, transparent);
+}
+
 /* Toolbar */
 .toolbar {
   -webkit-app-region: no-drag;
@@ -52,7 +77,7 @@ body,
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 0 6px;
+  padding: 0 36px 0 6px;
   background: rgba(0, 0, 0, 0.3);
   overflow-x: auto;
   scrollbar-width: none;
@@ -91,7 +116,7 @@ body,
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 6px;
+  padding: 0 36px 0 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--text-color) 12%, transparent);
   background: color-mix(in srgb, var(--bg-color) 94%, var(--text-color) 6%);
   font-family: "Segoe UI", sans-serif;
@@ -338,7 +363,7 @@ body,
   border-radius: 50%;
   background: #4fc3f7;
   position: absolute;
-  right: 6px;
+  right: 36px;
   top: 3px;
 }
 

@@ -489,6 +489,24 @@ export default function App(): ReactElement {
         {settings.clipboardWatch && <div className="watch-dot" />}
       </div>
 
+      {/* Dedicated top-right corner drag grip (inset from resize edges) */}
+      {!settings.locked && (
+        <div
+          className="corner-drag-handle"
+          title="Drag to move window"
+          aria-label="Drag to move window"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+            <circle cx="3.5" cy="3" r="1.1" />
+            <circle cx="8.5" cy="3" r="1.1" />
+            <circle cx="3.5" cy="6" r="1.1" />
+            <circle cx="8.5" cy="6" r="1.1" />
+            <circle cx="3.5" cy="9" r="1.1" />
+            <circle cx="8.5" cy="9" r="1.1" />
+          </svg>
+        </div>
+      )}
+
       {/* 28px toolbar row below drag strip, visible on hover when height >= 100 */}
       {showToolbar && windowHeight >= 100 && !isEditing && (
         <Toolbar
