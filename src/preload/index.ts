@@ -48,6 +48,12 @@ contextBridge.exposeInMainWorld('api', {
   windowApply: (payload: WindowApplyPayload): Promise<void> =>
     ipcRenderer.invoke(IPC.windowApply, payload),
 
+  openNewWindow: (payload?: ContentIncomingPayload): Promise<void> =>
+    ipcRenderer.invoke(IPC.windowNew, payload),
+
+  consumeInitialContent: (): Promise<ContentIncomingPayload | null> =>
+    ipcRenderer.invoke(IPC.consumeInitialContent),
+
   // ── Fire-and-forget ──────────────────────────────────────────
   metricsEnabled: (): Promise<boolean> =>
     ipcRenderer.invoke(IPC.metricsEnabled),
@@ -73,6 +79,12 @@ contextBridge.exposeInMainWorld('api', {
     const handler = (_event: Electron.IpcRendererEvent, message: string): void => cb(message)
     ipcRenderer.on(IPC.toast, handler)
     return () => ipcRenderer.off(IPC.toast, handler)
+  },
+
+  onSettingsUpdated: (cb: (settings: Settings) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, settings: Settings): void => cb(settings)
+    ipcRenderer.on(IPC.settingsUpdated, handler)
+    return () => ipcRenderer.off(IPC.settingsUpdated, handler)
   },
 
   // ── Utility ──────────────────────────────────────────────────

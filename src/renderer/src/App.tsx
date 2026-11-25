@@ -29,11 +29,14 @@ declare global {
       clipboardImport: () => Promise<void>
       shortcutsConflicts: () => Promise<ShortcutId[]>
       windowApply: (payload: WindowApplyPayload) => Promise<void>
+      openNewWindow: (payload?: ContentIncomingPayload) => Promise<void>
+      consumeInitialContent: () => Promise<ContentIncomingPayload | null>
       metricsEnabled: () => Promise<boolean>
       metricsMark: (payload: MetricsMarkPayload) => void
       onContentIncoming: (cb: (payload: ContentIncomingPayload) => void) => () => void
       onCommand: (cb: (cmd: ShortcutId) => void) => () => void
       onToast: (cb: (msg: string) => void) => () => void
+      onSettingsUpdated: (cb: (settings: Settings) => void) => () => void
       getPathForFile: (file: File) => string
     }
   }
@@ -53,6 +56,15 @@ function normalizeDropText(text: string): string {
     .replace(/[ \t]+$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
+}
+
+// Module-level guard so React StrictMode double-mount never loses pending initial content
+let initialContentPromise: Promise<ContentIncomingPayload | null> | null = null
+function getInitialContentOnce(): Promise<ContentIncomingPayload | null> {
+  if (!initialContentPromise) {
+    initialContentPromise = window.api.consumeInitialContent()
+  }
+  return initialContentPromise
 }
 
 export default function App(): ReactElement {
@@ -77,38 +89,15 @@ export default function App(): ReactElement {
     toastTimer.current = setTimeout(() => setToast(null), 2000)
   }, [])
 
-  // Load initial settings, metrics flag, and newest session
-  useEffect(() => {
-    if (!window.api) return
-    window.api.metricsEnabled().then(setScrollMetricsEnabled)
-    window.api.settingsGet().then((s) => {
-      setSettings(s)
-      applySettingsToDOM(s)
-    })
-    window.api.sessionsList().then((list) => {
-      if (list.length > 0) {
-        const newest = list[0]
-        setCurrentSession(newest)
-        setText(newest.text)
-      }
-    })
-  }, [])
-
-  // Window resize handler for toolbar visibility
-  useEffect(() => {
-    const handleResize = (): void => setWindowHeight(window.innerHeight)
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
-
   // Handle incoming content from main process (hotkey, watcher, file, or drop-text)
   const handleNewContent = useCallback(
-    (payload: ContentIncomingPayload) => {
+    (payload: ContentIncomingPayload, overrideSaveWatched?: boolean) => {
       const receiveTime = performance.timeOrigin + performance.now()
 
-      if (currentSession) {
-        setPreviousSessionId(currentSession.id)
-      }
+      setCurrentSession((prev) => {
+        if (prev) setPreviousSessionId(prev.id)
+        return prev
+      })
 
       const newSession: Session = {
         id: crypto.randomUUID
@@ -126,8 +115,8 @@ export default function App(): ReactElement {
       setCurrentSession(newSession)
       setText(payload.text)
 
-      // Watcher imports kept in memory only unless saveWatchedToHistory is true
-      if (payload.source !== 'clipboard-watch' || settings.saveWatchedToHistory) {
+      const shouldSaveWatched = overrideSaveWatched ?? settings.saveWatchedToHistory
+      if (payload.source !== 'clipboard-watch' || shouldSaveWatched) {
         window.api.sessionSave(newSession)
       }
 
@@ -149,8 +138,49 @@ export default function App(): ReactElement {
         })
       })
     },
-    [currentSession, settings.saveWatchedToHistory]
+    [settings.saveWatchedToHistory]
   )
+
+  // Load initial settings, metrics flag, and either pending new-window content or newest session
+  useEffect(() => {
+    if (!window.api) return
+    let cancelled = false
+
+    ;(async () => {
+      const [metricsOn, loadedSettings, initialPayload] = await Promise.all([
+        window.api.metricsEnabled(),
+        window.api.settingsGet(),
+        getInitialContentOnce()
+      ])
+      if (cancelled) return
+
+      setScrollMetricsEnabled(metricsOn)
+      setSettings(loadedSettings)
+      applySettingsToDOM(loadedSettings)
+
+      if (initialPayload) {
+        handleNewContent(initialPayload, loadedSettings.saveWatchedToHistory)
+      } else {
+        const list = await window.api.sessionsList()
+        if (!cancelled && list.length > 0) {
+          const newest = list[0]
+          setCurrentSession(newest)
+          setText(newest.text)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Window resize handler for toolbar visibility
+  useEffect(() => {
+    const handleResize = (): void => setWindowHeight(window.innerHeight)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   const handleBack = useCallback(async (): Promise<void> => {
     if (!previousSessionId) {
@@ -229,28 +259,38 @@ export default function App(): ReactElement {
   // Register push listeners
   useEffect(() => {
     if (!window.api) return
-    const unContent = window.api.onContentIncoming(handleNewContent)
+    const unContent = window.api.onContentIncoming((payload) => handleNewContent(payload))
     const unCommand = window.api.onCommand(handleCommand)
     const unToast = window.api.onToast((msg) => showToast(msg))
+    const unSettings = window.api.onSettingsUpdated((updated) => {
+      setSettings(updated)
+      applySettingsToDOM(updated)
+    })
 
     return () => {
       unContent()
       unCommand()
       unToast()
+      unSettings()
     }
   }, [handleNewContent, handleCommand, showToast])
 
-  // Local keydown (Ctrl+E for Edit)
+  // Local keydowns: Ctrl+E (Edit) and Ctrl+V (Paste clipboard import when not editing)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.ctrlKey && !e.altKey && (e.key === 'e' || e.key === 'E')) {
+      if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'e' || e.key === 'E')) {
         e.preventDefault()
         setIsEditing((v) => !v)
+        return
+      }
+      if (!isEditing && e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault()
+        window.api?.clipboardImport()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [isEditing])
 
   const handleEditSave = useCallback(
     async (newText: string): Promise<void> => {
@@ -327,14 +367,21 @@ export default function App(): ReactElement {
 
       const dropText = e.dataTransfer.getData('text/plain')
       if (dropText) {
-        handleNewContent({
-          text: normalizeDropText(dropText),
+        const cleaned = normalizeDropText(dropText)
+        if (!cleaned) return
+        const payload: ContentIncomingPayload = {
+          text: cleaned,
           source: 'drop-text',
           sentAt: performance.timeOrigin + performance.now()
-        })
+        }
+        if (settings.openInNewWindow && text) {
+          await window.api.openNewWindow(payload)
+        } else {
+          handleNewContent(payload)
+        }
       }
     },
-    [handleNewContent, showToast]
+    [handleNewContent, settings.openInNewWindow, showToast, text]
   )
 
   const handleDragOver = useCallback((e: React.DragEvent): void => {

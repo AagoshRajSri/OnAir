@@ -3,13 +3,14 @@ import { IPC } from '../shared/types'
 import type { ContentIncomingPayload } from '../shared/types'
 import { normalizeText } from './importers/normalize'
 import { metrics } from './metrics'
+import { deliverContentToWindow } from './window'
 
 const MAX_CHARS = 500_000
 
 let watchInterval: ReturnType<typeof setInterval> | null = null
 let lastClipboard = ''
 
-export function importFromClipboard(win: BrowserWindow): void {
+export async function importFromClipboard(win: BrowserWindow): Promise<void> {
   if (win.isDestroyed()) return
 
   metrics.start('clipboard-transfer')
@@ -33,18 +34,16 @@ export function importFromClipboard(win: BrowserWindow): void {
     source: 'clipboard-hotkey',
     sentAt: metrics.now()
   }
-  win.webContents.send(IPC.contentIncoming, payload)
+  await deliverContentToWindow(win, payload)
 }
 
-export function startClipboardWatcher(win: BrowserWindow): void {
+export function startClipboardWatcher(getTarget: () => BrowserWindow | null): void {
   if (watchInterval) return
   lastClipboard = clipboard.readText()
 
   watchInterval = setInterval(() => {
-    if (win.isDestroyed()) {
-      stopClipboardWatcher()
-      return
-    }
+    const target = getTarget()
+    if (!target || target.isDestroyed()) return
 
     // Password manager exclusion check (Microsoft documented clipboard format)
     try {
@@ -66,7 +65,7 @@ export function startClipboardWatcher(win: BrowserWindow): void {
       source: 'clipboard-watch',
       sentAt: metrics.now()
     }
-    win.webContents.send(IPC.contentIncoming, payload)
+    deliverContentToWindow(target, payload).catch(console.error)
   }, 500)
 }
 

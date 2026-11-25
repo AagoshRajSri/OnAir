@@ -4,9 +4,17 @@ import { promises as fs } from 'fs'
 import type { Settings, Session, ThemeId } from '../shared/types'
 import { DEFAULT_SETTINGS } from '../shared/types'
 
-const userDataPath = app.getPath('userData')
-const settingsPath = join(userDataPath, 'settings.json')
-const sessionsDir = join(userDataPath, 'sessions')
+function getUserDataPath(): string {
+  return app.getPath('userData')
+}
+
+function getSettingsPath(): string {
+  return join(getUserDataPath(), 'settings.json')
+}
+
+function getSessionsDir(): string {
+  return join(getUserDataPath(), 'sessions')
+}
 
 const VALID_THEMES: Set<ThemeId> = new Set([
   'obsidian',
@@ -44,6 +52,7 @@ function clampSettings(s: Settings): Settings {
 
 export async function loadSettings(): Promise<Settings> {
   if (cachedSettings) return cachedSettings
+  const settingsPath = getSettingsPath()
   try {
     const raw = await fs.readFile(settingsPath, 'utf-8')
     const parsed = JSON.parse(raw) as Partial<Settings>
@@ -58,7 +67,7 @@ export async function loadSettings(): Promise<Settings> {
   } catch (err: unknown) {
     const e = err as NodeJS.ErrnoException
     if (e.code !== 'ENOENT') {
-      const corrupt = join(userDataPath, `settings.corrupt-${Date.now()}.json`)
+      const corrupt = join(getUserDataPath(), `settings.corrupt-${Date.now()}.json`)
       try {
         await fs.rename(settingsPath, corrupt)
       } catch {
@@ -75,6 +84,7 @@ export async function loadSettings(): Promise<Settings> {
 
 export async function saveSettings(s: Settings): Promise<void> {
   cachedSettings = clampSettings(s)
+  const settingsPath = getSettingsPath()
   if (settingsDebounce) clearTimeout(settingsDebounce)
   return new Promise((resolve) => {
     settingsDebounce = setTimeout(async () => {
@@ -88,11 +98,12 @@ export async function saveSettings(s: Settings): Promise<void> {
 
 // ─── Sessions ─────────────────────────────────────────────────
 async function ensureSessionsDir(): Promise<void> {
-  await fs.mkdir(sessionsDir, { recursive: true })
+  await fs.mkdir(getSessionsDir(), { recursive: true })
 }
 
 export async function listSessions(): Promise<Session[]> {
   await ensureSessionsDir()
+  const sessionsDir = getSessionsDir()
   let files: string[]
   try {
     files = await fs.readdir(sessionsDir)
@@ -116,7 +127,7 @@ export async function listSessions(): Promise<Session[]> {
 export async function loadSession(id: string): Promise<Session | null> {
   await ensureSessionsDir()
   try {
-    const raw = await fs.readFile(join(sessionsDir, `${id}.json`), 'utf-8')
+    const raw = await fs.readFile(join(getSessionsDir(), `${id}.json`), 'utf-8')
     return JSON.parse(raw) as Session
   } catch {
     return null
@@ -125,13 +136,13 @@ export async function loadSession(id: string): Promise<Session | null> {
 
 export async function saveSession(session: Session): Promise<void> {
   await ensureSessionsDir()
-  await atomicWrite(join(sessionsDir, `${session.id}.json`), JSON.stringify(session, null, 2))
+  await atomicWrite(join(getSessionsDir(), `${session.id}.json`), JSON.stringify(session, null, 2))
 }
 
 export async function deleteSession(id: string): Promise<void> {
   await ensureSessionsDir()
   try {
-    await fs.unlink(join(sessionsDir, `${id}.json`))
+    await fs.unlink(join(getSessionsDir(), `${id}.json`))
   } catch {
     /* ignore */
   }
@@ -139,6 +150,7 @@ export async function deleteSession(id: string): Promise<void> {
 
 export async function clearSessions(): Promise<void> {
   await ensureSessionsDir()
+  const sessionsDir = getSessionsDir()
   const files = await fs.readdir(sessionsDir)
   await Promise.all(
     files.filter((f) => f.endsWith('.json')).map((f) => fs.unlink(join(sessionsDir, f)).catch(() => {}))
@@ -150,6 +162,7 @@ const MAX_SESSIONS = 20
 
 export async function pruneSessions(): Promise<void> {
   await ensureSessionsDir()
+  const sessionsDir = getSessionsDir()
   let sessions = await listSessions()
   const cutoff = Date.now() - SEVEN_DAYS_MS
 

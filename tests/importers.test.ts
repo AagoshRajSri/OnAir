@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
 import { join } from 'path'
+
+vi.mock('../src/main/window', () => ({
+  deliverContentToWindow: vi.fn(async (win, payload) => {
+    win?.webContents?.send('content:incoming', payload)
+  })
+}))
+
 import { importTxt } from '../src/main/importers/txt'
 import { importPdf } from '../src/main/importers/pdf'
 import { importDocx } from '../src/main/importers/docx'

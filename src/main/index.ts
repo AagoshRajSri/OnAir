@@ -1,5 +1,5 @@
 import { app, nativeTheme } from 'electron'
-import { createReaderWindow } from './window'
+import { createReaderWindow, getAllWindows, getTargetWindow } from './window'
 import { registerShortcuts, unregisterAll } from './shortcuts'
 import { setupIpc } from './ipc'
 import { loadSettings, pruneSessions } from './storage'
@@ -14,15 +14,18 @@ nativeTheme.themeSource = 'dark'
 app.whenReady().then(async () => {
   await pruneSessions()
   const settings = await loadSettings()
-  const win = await createReaderWindow((w) => setupIpc(w))
-  await registerShortcuts(win)
+  setupIpc()
+  await createReaderWindow()
+  await registerShortcuts()
 
   if (settings.clipboardWatch) {
-    startClipboardWatcher(win)
+    startClipboardWatcher(getTargetWindow)
   }
 
   app.on('activate', () => {
-    if (!win.isDestroyed()) win.show()
+    for (const w of getAllWindows()) {
+      w.show()
+    }
   })
 })
 

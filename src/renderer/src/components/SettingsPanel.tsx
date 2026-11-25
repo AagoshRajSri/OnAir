@@ -423,6 +423,20 @@ export default function SettingsPanel({
               >
                 Wide (900×360)
               </button>
+              <button
+                onClick={() => window.api.openNewWindow()}
+                style={{
+                  background: '#2a2d35',
+                  border: 'none',
+                  color: '#e6e8ec',
+                  cursor: 'pointer',
+                  borderRadius: 3,
+                  padding: '3px 8px',
+                  fontSize: 11
+                }}
+              >
+                + New window
+              </button>
             </div>
           </div>
         </div>
@@ -447,6 +461,17 @@ export default function SettingsPanel({
         {/* Clipboard */}
         <div className="section">
           <h2>Clipboard</h2>
+          <div className="row">
+            <span>Open copy/paste in new window</span>
+            <input
+              type="checkbox"
+              checked={settings.openInNewWindow}
+              onChange={(e) => onChange({ openInNewWindow: e.target.checked })}
+            />
+          </div>
+          <div style={{ opacity: 0.65, fontSize: 10, marginBottom: 8, lineHeight: 1.3 }}>
+            When on, pasting (Ctrl+V / Ctrl+Alt+V) or importing opens a new floating window instead of replacing the current text.
+          </div>
           <div className="row">
             <span>Monitor clipboard</span>
             <input

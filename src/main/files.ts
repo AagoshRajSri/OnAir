@@ -6,6 +6,7 @@ import type { ContentIncomingPayload } from '../shared/types'
 import { importTxt } from './importers/txt'
 import { importPdf } from './importers/pdf'
 import { importDocx } from './importers/docx'
+import { deliverContentToWindow } from './window'
 
 const MAX_BYTES = 10_485_760 // 10 MB
 const ALLOWED_EXTENSIONS = new Set(['.txt', '.pdf', '.docx'])
@@ -56,6 +57,6 @@ export async function importFile(filePath: string, win: BrowserWindow): Promise<
     fileName: basename(filePath),
     sentAt: Date.now()
   }
-  win.webContents.send(IPC.contentIncoming, payload)
+  await deliverContentToWindow(win, payload)
   return text
 }

@@ -69,3 +69,4 @@ describe('Metrics trial persistence across restarts', () => {
     await expect(fs.access(csvPath)).rejects.toThrow()
   })
 })
+

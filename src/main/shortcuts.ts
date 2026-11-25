@@ -1,9 +1,10 @@
-import { globalShortcut, BrowserWindow } from 'electron'
+import { globalShortcut } from 'electron'
 import type { ShortcutId } from '../shared/types'
 import { IPC } from '../shared/types'
 import { loadSettings } from './storage'
 import { importFromClipboard } from './clipboard'
 import { metrics } from './metrics'
+import { getAllWindows, getTargetWindow } from './window'
 
 let registeredKeys: string[] = []
 let currentConflicts: ShortcutId[] = []
@@ -12,48 +13,42 @@ export function getShortcutConflicts(): ShortcutId[] {
   return [...currentConflicts]
 }
 
-export async function registerShortcuts(win: BrowserWindow): Promise<ShortcutId[]> {
+export async function registerShortcuts(): Promise<ShortcutId[]> {
   unregisterAll()
   const settings = await loadSettings()
 
+  const sendCommand = (cmd: ShortcutId): void => {
+    const win = getTargetWindow()
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(IPC.command, cmd)
+    }
+  }
+
   const shortcutMap: Record<ShortcutId, () => void> = {
     toggleWindow: () => {
-      if (win.isDestroyed()) return
-      if (win.isVisible()) {
-        win.hide()
-      } else {
+      const windows = getAllWindows()
+      const anyVisible = windows.some((w) => w.isVisible())
+      if (anyVisible) {
+        for (const w of windows) w.hide()
+      } else if (windows.length > 0) {
         metrics.start('show-window')
-        win.show()
+        for (const w of windows) w.show()
       }
     },
     importClipboard: () => {
-      if (win.isDestroyed()) return
-      importFromClipboard(win)
+      const win = getTargetWindow()
+      if (win && !win.isDestroyed()) {
+        importFromClipboard(win).catch(console.error)
+      }
     },
-    fontUp: () => {
-      if (!win.isDestroyed()) win.webContents.send(IPC.command, 'fontUp' satisfies ShortcutId)
-    },
-    fontDown: () => {
-      if (!win.isDestroyed()) win.webContents.send(IPC.command, 'fontDown' satisfies ShortcutId)
-    },
-    nextSentence: () => {
-      if (!win.isDestroyed()) win.webContents.send(IPC.command, 'nextSentence' satisfies ShortcutId)
-    },
-    prevSentence: () => {
-      if (!win.isDestroyed()) win.webContents.send(IPC.command, 'prevSentence' satisfies ShortcutId)
-    },
-    toggleScroll: () => {
-      if (!win.isDestroyed()) win.webContents.send(IPC.command, 'toggleScroll' satisfies ShortcutId)
-    },
-    toggleLock: () => {
-      if (!win.isDestroyed()) win.webContents.send(IPC.command, 'toggleLock' satisfies ShortcutId)
-    },
-    back: () => {
-      if (!win.isDestroyed()) win.webContents.send(IPC.command, 'back' satisfies ShortcutId)
-    },
-    openSettings: () => {
-      if (!win.isDestroyed()) win.webContents.send(IPC.command, 'openSettings' satisfies ShortcutId)
-    }
+    fontUp: () => sendCommand('fontUp'),
+    fontDown: () => sendCommand('fontDown'),
+    nextSentence: () => sendCommand('nextSentence'),
+    prevSentence: () => sendCommand('prevSentence'),
+    toggleScroll: () => sendCommand('toggleScroll'),
+    toggleLock: () => sendCommand('toggleLock'),
+    back: () => sendCommand('back'),
+    openSettings: () => sendCommand('openSettings')
   }
 
   const conflicts: ShortcutId[] = []
