@@ -9,6 +9,7 @@ import type {
 } from '../../shared/types'
 import { DEFAULT_SETTINGS } from '../../shared/types'
 import { applySettingsToDOM } from './lib/themes'
+import { setScrollMetricsEnabled } from './lib/autoscroll'
 import Reader from './components/Reader'
 import Toolbar from './components/Toolbar'
 import SettingsPanel from './components/SettingsPanel'
@@ -28,6 +29,7 @@ declare global {
       clipboardImport: () => Promise<void>
       shortcutsConflicts: () => Promise<ShortcutId[]>
       windowApply: (payload: WindowApplyPayload) => Promise<void>
+      metricsEnabled: () => Promise<boolean>
       metricsMark: (payload: MetricsMarkPayload) => void
       onContentIncoming: (cb: (payload: ContentIncomingPayload) => void) => () => void
       onCommand: (cb: (cmd: ShortcutId) => void) => () => void
@@ -75,8 +77,9 @@ export default function App(): ReactElement {
     toastTimer.current = setTimeout(() => setToast(null), 2000)
   }, [])
 
-  // Load initial settings and newest session
+  // Load initial settings, metrics flag, and newest session
   useEffect(() => {
+    window.api.metricsEnabled().then(setScrollMetricsEnabled)
     window.api.settingsGet().then((s) => {
       setSettings(s)
       applySettingsToDOM(s)

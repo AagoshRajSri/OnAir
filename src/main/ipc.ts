@@ -13,7 +13,7 @@ import {
 } from './storage'
 import { applyWindowSettings } from './window'
 import { importFile, openFileDialog } from './files'
-import { metrics } from './metrics'
+import { metrics, isMetricsEnabled } from './metrics'
 import { importFromClipboard, startClipboardWatcher, stopClipboardWatcher } from './clipboard'
 import { registerShortcuts, getShortcutConflicts } from './shortcuts'
 
@@ -90,6 +90,10 @@ export function setupIpc(win: BrowserWindow): void {
 
   ipcMain.handle(IPC.windowApply, async (_e, payload: WindowApplyPayload) => {
     applyWindowSettings(win, payload)
+  })
+
+  ipcMain.handle(IPC.metricsEnabled, async () => {
+    return isMetricsEnabled
   })
 
   ipcMain.on(IPC.metricsMark, (_e, payload: MetricsMarkPayload) => {

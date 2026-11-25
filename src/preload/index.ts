@@ -49,6 +49,9 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke(IPC.windowApply, payload),
 
   // ── Fire-and-forget ──────────────────────────────────────────
+  metricsEnabled: (): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.metricsEnabled),
+
   metricsMark: (payload: MetricsMarkPayload): void => {
     ipcRenderer.send(IPC.metricsMark, payload)
   },

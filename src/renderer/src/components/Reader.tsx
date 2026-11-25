@@ -55,11 +55,27 @@ export default function Reader({
   // Autoscroll control
   const startScroll = useCallback(() => {
     if (!containerRef.current) return
-    scrollerRef.current.start(containerRef.current, settings.autoScrollSpeed, () => {
-      setScrolling(false)
-      setShowEnd(true)
-      setTimeout(() => setShowEnd(false), 1500)
-    })
+    scrollerRef.current.start(
+      containerRef.current,
+      settings.autoScrollSpeed,
+      () => {
+        setScrolling(false)
+        setShowEnd(true)
+        setTimeout(() => setShowEnd(false), 1500)
+      },
+      (avgFps, over33Pct) => {
+        window.api.metricsMark({
+          metric: 'smoothness-avg-fps',
+          phase: 'duration',
+          timeMs: avgFps
+        })
+        window.api.metricsMark({
+          metric: 'smoothness-over33ms-pct',
+          phase: 'duration',
+          timeMs: over33Pct
+        })
+      }
+    )
     setScrolling(true)
   }, [settings.autoScrollSpeed])
 

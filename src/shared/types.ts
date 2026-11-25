@@ -101,7 +101,8 @@ export const IPC = {
   command: 'command',
   toast: 'toast',
   windowApply: 'window:apply',
-  metricsMark: 'metrics:mark'
+  metricsMark: 'metrics:mark',
+  metricsEnabled: 'metrics:enabled'
 } as const
 
 export interface ContentIncomingPayload {

@@ -4,6 +4,7 @@ import { app } from 'electron'
 import type { MetricsMarkPayload } from '../shared/types'
 
 const METRICS_ENABLED = process.env['FR_METRICS'] === '1'
+export const isMetricsEnabled = METRICS_ENABLED
 const outputPath = join(app.getPath('userData'), 'latency-results.csv')
 
 class Metrics {
