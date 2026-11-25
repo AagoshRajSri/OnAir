@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen, Menu, type Rectangle } from 'electron'
+import { app, BrowserWindow, screen, Menu, nativeImage, type Rectangle } from 'electron'
 import { join } from 'path'
 import { loadSettings, saveSettings } from './storage'
 import { openFileDialog, importFile } from './files'
@@ -86,6 +86,18 @@ function getCascadedBounds(refWin: BrowserWindow): Rectangle {
   return { x, y, width: ref.width, height: ref.height }
 }
 
+function getAppIcon(): Electron.NativeImage | undefined {
+  const candidates = [
+    join(app.getAppPath(), 'build/icon.png'),
+    join(app.getAppPath(), 'src/onairlogo.png')
+  ]
+  for (const p of candidates) {
+    const img = nativeImage.createFromPath(p)
+    if (!img.isEmpty()) return img
+  }
+  return undefined
+}
+
 export interface CreateWindowOptions {
   initialContent?: ContentIncomingPayload
   offsetFrom?: BrowserWindow | null
@@ -107,6 +119,7 @@ export async function createReaderWindow(
     height: bounds.height,
     minWidth: 120,
     minHeight: 40,
+    icon: getAppIcon(),
     frame: false,
     transparent: false,
     resizable: !settings.locked,
