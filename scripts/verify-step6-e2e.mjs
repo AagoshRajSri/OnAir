@@ -162,3 +162,4 @@ try {
   await sleep(300)
   await rm(SCRATCH_APPDATA, { recursive: true, force: true }).catch(() => {})
 }
+
