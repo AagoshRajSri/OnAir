@@ -20,6 +20,7 @@ All installed package versions are recorded here per the build spec.
 | react-dom | 19.1.0 | React DOM renderer |
 | pdfjs-dist | 4.9.155 | PDF text extraction (spec §6.3) |
 | mammoth | 1.9.0 | DOCX text extraction (spec §6.4) |
+| ws | 8.23.0 | Localhost WebSocket bridge for Phase 2 browser extension |
 
 ## Dev Dependencies
 
@@ -33,6 +34,10 @@ All installed package versions are recorded here per the build spec.
 | @types/react | 19.1.0 | React type definitions |
 | @types/react-dom | 19.1.0 | ReactDOM type definitions |
 | @types/node | 22.14.0 | Node.js type definitions |
+| @types/ws | 8.18.2 | Localhost WebSocket bridge for Phase 2 browser extension |
+| @types/chrome | 0.3.8 | Chrome Extension Manifest V3 API types (Phase 2) |
+| jsdom | 29.1.1 | DOM parsing for Chrome extension provider selector tests (Phase 2) |
+| @types/jsdom | 30.0.0 | JSDOM type definitions for extension tests (Phase 2) |
 | @electron-toolkit/tsconfig | 1.0.1 | Base tsconfig presets |
 | @electron-toolkit/eslint-config-ts | 3.0.0 | ESLint config |
 | @electron-toolkit/eslint-config-prettier | 3.0.0 | Prettier integration |
@@ -42,7 +47,8 @@ All installed package versions are recorded here per the build spec.
 
 ## Extra Package Rationale
 
-No extra packages added beyond spec. All packages above are explicitly required by the Phase 1 Build Spec §1.2.
+- **Phase 1**: All packages above (except Phase 2 additions) are required by the Phase 1 Build Spec §1.2.
+- **Phase 2**: Added `ws` (`8.23.0`) and `@types/ws` (`8.18.2`) — Localhost WebSocket bridge for Phase 2 browser extension.
 
 ## Milestone Log
 

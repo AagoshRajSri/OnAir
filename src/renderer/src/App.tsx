@@ -5,11 +5,13 @@ import type {
   ContentIncomingPayload,
   ShortcutId,
   WindowApplyPayload,
-  MetricsMarkPayload
+  MetricsMarkPayload,
+  BridgeStatus
 } from '../../shared/types'
 import { DEFAULT_SETTINGS } from '../../shared/types'
 import { applySettingsToDOM } from './lib/themes'
 import { setScrollMetricsEnabled } from './lib/autoscroll'
+import { splitSentences, clampSentenceIndex } from './lib/sentences'
 import Reader from './components/Reader'
 import Toolbar from './components/Toolbar'
 import SettingsPanel from './components/SettingsPanel'
@@ -29,12 +31,15 @@ declare global {
       clipboardImport: () => Promise<void>
       shortcutsConflicts: () => Promise<ShortcutId[]>
       windowApply: (payload: WindowApplyPayload) => Promise<void>
+      bridgeStatusGet: () => Promise<BridgeStatus>
+      bridgeTokenRegenerate: () => Promise<string>
       metricsEnabled: () => Promise<boolean>
       metricsMark: (payload: MetricsMarkPayload) => void
       onContentIncoming: (cb: (payload: ContentIncomingPayload) => void) => () => void
       onCommand: (cb: (cmd: ShortcutId) => void) => () => void
       onToast: (cb: (msg: string) => void) => () => void
       onSettingsUpdated: (cb: (settings: Settings) => void) => () => void
+      onBridgeStatusUpdated: (cb: (status: BridgeStatus) => void) => () => void
       getPathForFile: (file: File) => string
     }
   }
@@ -74,9 +79,22 @@ export default function App(): ReactElement {
   const [isEditing, setIsEditing] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const [commandEvent, setCommandEvent] = useState<{ cmd: ShortcutId; seq: number } | null>(null)
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({
+    state: 'stopped',
+    port: DEFAULT_SETTINGS.bridgePort,
+    error: null,
+    connectedClients: 0,
+    pairedExtensionId: ''
+  })
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sentenceSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const bridgeSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const tabsRef = useRef<Session[]>([])
+  const activeTabIdRef = useRef<string | null>(null)
   const cmdSeq = useRef(0)
+
+  tabsRef.current = tabs
+  activeTabIdRef.current = activeTabId
 
   const currentSession = tabs.find((t) => t.id === activeTabId) ?? null
   const text = currentSession?.text ?? ''
@@ -93,15 +111,17 @@ export default function App(): ReactElement {
     let cancelled = false
 
     ;(async () => {
-      const [metricsOn, loadedSettings, list] = await Promise.all([
+      const [metricsOn, loadedSettings, list, initialBridgeStatus] = await Promise.all([
         window.api.metricsEnabled(),
         window.api.settingsGet(),
-        window.api.sessionsList()
+        window.api.sessionsList(),
+        window.api.bridgeStatusGet()
       ])
       if (cancelled) return
 
       setScrollMetricsEnabled(metricsOn)
       setSettings(loadedSettings)
+      setBridgeStatus(initialBridgeStatus)
       applySettingsToDOM(loadedSettings)
 
       if (list.length > 0) {
@@ -123,39 +143,75 @@ export default function App(): ReactElement {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Handle incoming content: open in a new tab of the single main window
+  // Handle incoming content: update active/matching bridge session in place or open new tab via §7.4
   const handleNewContent = useCallback(
     (payload: ContentIncomingPayload) => {
       const receiveTime = performance.timeOrigin + performance.now()
+      const currentActiveId = activeTabIdRef.current
+      const existingBridgeSession = payload.bridgeId
+        ? tabsRef.current.find((t) => t.bridgeMessageId === payload.bridgeId)
+        : undefined
 
-      const newSession: Session = {
-        id: newUuid(),
-        title: payload.fileName ? payload.fileName.slice(0, 40) : makeTitle(payload.text),
-        source: payload.source,
-        fileName: payload.fileName,
-        text: payload.text,
-        sentenceIndex: 0,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      }
-
-      setTabs((prevTabs) => {
-        const current = prevTabs.find((t) => t.id === activeTabId)
-        if (current && current.text === '') {
-          // Replace blank untitled tab rather than leaving an empty tab behind
-          return prevTabs.map((t) => (t.id === current.id ? newSession : t))
+      if (existingBridgeSession && payload.bridgeId) {
+        const sentenceCount = splitSentences(payload.text).length
+        const clampedIndex = clampSentenceIndex(existingBridgeSession.sentenceIndex, sentenceCount)
+        const updatedSession: Session = {
+          ...existingBridgeSession,
+          title: payload.fileName ? payload.fileName.slice(0, 40) : makeTitle(payload.text),
+          text: payload.text,
+          sentenceIndex: clampedIndex,
+          updatedAt: Date.now()
         }
-        return [...prevTabs, newSession]
-      })
-      if (activeTabId) {
-        setPreviousSessionId(activeTabId)
-      }
-      setActiveTabId(newSession.id)
-      setIsEditing(false)
+        const nextTabs = tabsRef.current.map((t) => (t.id === updatedSession.id ? updatedSession : t))
+        tabsRef.current = nextTabs
+        setTabs(nextTabs)
+        if (updatedSession.id === currentActiveId) {
+          setIsEditing(false)
+        }
 
-      // Watcher imports kept in memory only unless saveWatchedToHistory is true
-      if (payload.source !== 'clipboard-watch' || settings.saveWatchedToHistory) {
-        window.api.sessionSave(newSession)
+        if (payload.final === false) {
+          if (bridgeSaveTimer.current) clearTimeout(bridgeSaveTimer.current)
+          bridgeSaveTimer.current = setTimeout(() => {
+            window.api.sessionSave(updatedSession)
+          }, 500)
+        } else {
+          if (bridgeSaveTimer.current) {
+            clearTimeout(bridgeSaveTimer.current)
+            bridgeSaveTimer.current = null
+          }
+          window.api.sessionSave(updatedSession)
+        }
+      } else {
+        const newSession: Session = {
+          id: newUuid(),
+          title: payload.fileName ? payload.fileName.slice(0, 40) : makeTitle(payload.text),
+          source: payload.source,
+          fileName: payload.fileName,
+          bridgeMessageId: payload.bridgeId,
+          text: payload.text,
+          sentenceIndex: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        }
+
+        const current = tabsRef.current.find((t) => t.id === currentActiveId)
+        const nextTabs =
+          current && current.text === ''
+            ? tabsRef.current.map((t) => (t.id === current.id ? newSession : t))
+            : [...tabsRef.current, newSession]
+        tabsRef.current = nextTabs
+        setTabs(nextTabs)
+        if (currentActiveId) {
+          setPreviousSessionId(currentActiveId)
+        }
+        activeTabIdRef.current = newSession.id
+        setActiveTabId(newSession.id)
+        setIsEditing(false)
+
+        // Watcher imports kept in memory only unless saveWatchedToHistory is true
+        if (payload.source !== 'clipboard-watch' || settings.saveWatchedToHistory) {
+          window.api.sessionSave(newSession)
+        }
       }
 
       requestAnimationFrame(() => {
@@ -172,11 +228,17 @@ export default function App(): ReactElement {
               phase: 'end',
               timeMs: paintedTime
             })
+          } else if (payload.source === 'bridge' && payload.bridgeSentAt !== undefined) {
+            window.api.metricsMark({
+              metric: 'bridge-transfer',
+              phase: 'duration',
+              timeMs: paintedTime - payload.bridgeSentAt
+            })
           }
         })
       })
     },
-    [activeTabId, settings.saveWatchedToHistory]
+    [settings.saveWatchedToHistory]
   )
 
   const openSessionInTabs = useCallback(
@@ -288,12 +350,16 @@ export default function App(): ReactElement {
       setSettings(updated)
       applySettingsToDOM(updated)
     })
+    const unBridge = window.api.onBridgeStatusUpdated((status) => {
+      setBridgeStatus(status)
+    })
 
     return () => {
       unContent()
       unCommand()
       unToast()
       unSettings()
+      unBridge()
     }
   }, [handleNewContent, handleCommand, showToast])
 
@@ -594,6 +660,7 @@ export default function App(): ReactElement {
       {showSettings && (
         <SettingsPanel
           settings={settings}
+          bridgeStatus={bridgeStatus}
           onChange={handleSettingsChange}
           onClose={() => setShowSettings(false)}
           showToast={showToast}

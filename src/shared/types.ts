@@ -39,6 +39,9 @@ export interface Settings {
   saveWatchedToHistory: boolean
   pageMode: boolean
   bounds: { x: number; y: number; width: number; height: number } | null
+  bridgePort: number
+  bridgeToken: string
+  bridgeExtensionId: string
   shortcuts: Record<ShortcutId, string>
 }
 
@@ -62,6 +65,9 @@ export const DEFAULT_SETTINGS: Settings = {
   saveWatchedToHistory: false,
   pageMode: true,
   bounds: null,
+  bridgePort: 47821,
+  bridgeToken: '',
+  bridgeExtensionId: '',
   shortcuts: {
     toggleWindow: 'Ctrl+Alt+R',
     importClipboard: 'Ctrl+Alt+V',
@@ -76,11 +82,24 @@ export const DEFAULT_SETTINGS: Settings = {
   }
 }
 
+export type BridgeProvider = 'chatgpt' | 'claude' | 'selection'
+
+export type BridgeState = 'stopped' | 'listening' | 'error'
+
+export interface BridgeStatus {
+  state: BridgeState
+  port: number
+  error: string | null
+  connectedClients: number
+  pairedExtensionId: string
+}
+
 export interface Session {
   id: string // crypto.randomUUID()
   title: string // first 40 characters, line breaks turned into spaces; 'Untitled' if empty
-  source: 'typed' | 'clipboard-hotkey' | 'clipboard-watch' | 'drop-text' | 'file'
+  source: 'typed' | 'clipboard-hotkey' | 'clipboard-watch' | 'drop-text' | 'file' | 'bridge'
   fileName?: string
+  bridgeMessageId?: string
   text: string
   sentenceIndex: number
   createdAt: number // epoch milliseconds
@@ -105,14 +124,21 @@ export const IPC = {
   windowApply: 'window:apply',
   settingsUpdated: 'settings:updated',
   metricsMark: 'metrics:mark',
-  metricsEnabled: 'metrics:enabled'
+  metricsEnabled: 'metrics:enabled',
+  bridgeStatusGet: 'bridge:status-get',
+  bridgeStatusUpdated: 'bridge:status-updated',
+  bridgeTokenRegenerate: 'bridge:token-regenerate'
 } as const
 
 export interface ContentIncomingPayload {
   text: string
   source: Session['source']
   fileName?: string
+  bridgeId?: string
+  provider?: BridgeProvider
+  final?: boolean
   sentAt: number
+  bridgeSentAt?: number
 }
 
 export interface WindowApplyPayload {

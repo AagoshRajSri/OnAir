@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import type { Settings, Session, ThemeId, ShortcutId } from '../../../shared/types'
+import type { Settings, Session, ThemeId, ShortcutId, BridgeStatus } from '../../../shared/types'
 import { THEME_PRESETS } from '../lib/themes'
 
 interface SettingsPanelProps {
   settings: Settings
+  bridgeStatus: BridgeStatus
   onChange: (patch: Partial<Settings>) => void
   onClose: () => void
   onSelectSession: (id: string) => Promise<void>
@@ -59,6 +60,7 @@ function keyEventToAccelerator(e: React.KeyboardEvent): string | null {
 
 export default function SettingsPanel({
   settings,
+  bridgeStatus,
   onChange,
   onClose,
   onSelectSession,
@@ -70,7 +72,38 @@ export default function SettingsPanel({
   const [conflicts, setConflicts] = useState<ShortcutId[]>([])
   const [recordingId, setRecordingId] = useState<ShortcutId | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [portDraft, setPortDraft] = useState(String(settings.bridgePort))
   const isCustomFont = !FONT_OPTIONS.includes(settings.fontFamily)
+
+  useEffect(() => {
+    setPortDraft(String(settings.bridgePort))
+  }, [settings.bridgePort])
+
+  const commitBridgePort = (): void => {
+    const parsed = Number.parseInt(portDraft, 10)
+    if (!Number.isFinite(parsed) || parsed < 1024 || parsed > 65535) {
+      setPortDraft(String(settings.bridgePort))
+      showToast('Port must be between 1024 and 65535.')
+      return
+    }
+    if (parsed !== settings.bridgePort) {
+      onChange({ bridgePort: parsed })
+    }
+  }
+
+  const handleCopyToken = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(settings.bridgeToken)
+      showToast('Pairing token copied.')
+    } catch {
+      showToast('Select token text to copy.')
+    }
+  }
+
+  const handleRegenerateToken = async (): Promise<void> => {
+    await window.api.bridgeTokenRegenerate()
+    showToast('Bridge token regenerated.')
+  }
 
   useEffect(() => {
     window.api.sessionsList().then(setSessions)
@@ -483,6 +516,128 @@ export default function SettingsPanel({
               />
             </div>
           )}
+        </div>
+
+        {/* Browser Bridge */}
+        <div className="section">
+          <h2>Browser Bridge</h2>
+
+          <div className="row">
+            <span>Status</span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 11,
+                color:
+                  bridgeStatus.state === 'listening'
+                    ? '#81c784'
+                    : bridgeStatus.state === 'error'
+                      ? '#ff6b6b'
+                      : '#9aa0a6'
+              }}
+            >
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background:
+                    bridgeStatus.state === 'listening'
+                      ? '#4caf50'
+                      : bridgeStatus.state === 'error'
+                        ? '#ff5252'
+                        : '#757575'
+                }}
+              />
+              {bridgeStatus.state === 'listening'
+                ? `Listening (${bridgeStatus.port}${bridgeStatus.connectedClients > 0 ? ` · ${bridgeStatus.connectedClients} active` : ''})`
+                : bridgeStatus.state === 'error'
+                  ? bridgeStatus.error || 'Error'
+                  : 'Stopped'}
+            </span>
+          </div>
+
+          <div className="row">
+            <span>Port (127.0.0.1)</span>
+            <input
+              type="number"
+              min={1024}
+              max={65535}
+              value={portDraft}
+              onChange={(e) => setPortDraft(e.target.value)}
+              onBlur={commitBridgePort}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  commitBridgePort()
+                  ;(e.target as HTMLInputElement).blur()
+                }
+              }}
+              style={{ width: 84 }}
+            />
+          </div>
+
+          <div className="row">
+            <span>Chrome Extension ID</span>
+            <input
+              type="text"
+              value={settings.bridgeExtensionId}
+              placeholder="Extension ID"
+              onChange={(e) => onChange({ bridgeExtensionId: e.target.value.trim() })}
+              style={{ width: 132 }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span>Pairing Token</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  type="button"
+                  onClick={handleCopyToken}
+                  style={{
+                    background: '#2a2d35',
+                    border: 'none',
+                    color: '#e6e8ec',
+                    cursor: 'pointer',
+                    borderRadius: 3,
+                    padding: '2px 6px',
+                    fontSize: 10
+                  }}
+                >
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRegenerateToken}
+                  style={{
+                    background: '#2a2d35',
+                    border: 'none',
+                    color: '#e6e8ec',
+                    cursor: 'pointer',
+                    borderRadius: 3,
+                    padding: '2px 6px',
+                    fontSize: 10
+                  }}
+                >
+                  Regenerate
+                </button>
+              </div>
+            </div>
+            <input
+              type="text"
+              readOnly
+              value={settings.bridgeToken}
+              aria-label="Pairing token"
+              onFocus={(e) => e.target.select()}
+              style={{ width: '100%', fontFamily: 'Consolas, monospace', fontSize: 10 }}
+            />
+          </div>
+
+          <div style={{ opacity: 0.65, fontSize: 10, lineHeight: 1.3 }}>
+            Listens on localhost only and rejects connections unless Origin matches your Extension ID.
+          </div>
         </div>
 
         {/* Shortcuts */}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { splitSentences, findParagraphStart } from '../src/renderer/src/lib/sentences'
+import { splitSentences, findParagraphStart, clampSentenceIndex } from '../src/renderer/src/lib/sentences'
 
 describe('splitSentences', () => {
   it('returns empty array for empty string', () => {
@@ -68,4 +68,18 @@ describe('findParagraphStart', () => {
     expect(result).toBe(segs.length - 1)
   })
 })
+
+describe('clampSentenceIndex', () => {
+  it('clamps sentenceIndex when text shrinks or is out of bounds', () => {
+    // If text shrunk from 10 sentences to 3, index 9 is clamped to 2
+    expect(clampSentenceIndex(9, 3)).toBe(2)
+    // If index is within bounds, it is preserved
+    expect(clampSentenceIndex(1, 3)).toBe(1)
+    // Negative index clamped to 0
+    expect(clampSentenceIndex(-1, 3)).toBe(0)
+    // Empty text clamped to 0
+    expect(clampSentenceIndex(5, 0)).toBe(0)
+  })
+})
+
 

@@ -8,9 +8,10 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:ext": "node extension/build.mjs",
     "build:win": "npm run build && electron-builder --win",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p extension/tsconfig.json",
     "lint": "eslint src",
     "test": "vitest run"
   },
@@ -18,21 +19,26 @@
     "mammoth": "1.9.0",
     "pdfjs-dist": "4.9.155",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "ws": "8.23.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "3.0.0",
     "@electron-toolkit/eslint-config-ts": "3.0.0",
     "@electron-toolkit/tsconfig": "1.0.1",
+    "@types/chrome": "0.3.8",
+    "@types/jsdom": "30.0.0",
     "@types/node": "22.14.0",
     "@types/react": "19.1.0",
     "@types/react-dom": "19.1.0",
+    "@types/ws": "8.18.2",
     "@vitejs/plugin-react": "4.4.1",
     "electron": "36.4.0",
     "electron-builder": "26.0.12",
     "electron-vite": "3.1.0",
     "eslint": "9.23.0",
     "eslint-plugin-react-hooks": "5.2.0",
+    "jsdom": "29.1.1",
     "typescript": "5.8.3",
     "vite": "6.3.5",
     "vitest": "3.2.4"

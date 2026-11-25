@@ -5,7 +5,8 @@ import type {
   ShortcutId,
   ContentIncomingPayload,
   WindowApplyPayload,
-  MetricsMarkPayload
+  MetricsMarkPayload,
+  BridgeStatus
 } from '../shared/types'
 import { IPC } from '../shared/types'
 
@@ -48,6 +49,12 @@ contextBridge.exposeInMainWorld('api', {
   windowApply: (payload: WindowApplyPayload): Promise<void> =>
     ipcRenderer.invoke(IPC.windowApply, payload),
 
+  bridgeStatusGet: (): Promise<BridgeStatus> =>
+    ipcRenderer.invoke(IPC.bridgeStatusGet),
+
+  bridgeTokenRegenerate: (): Promise<string> =>
+    ipcRenderer.invoke(IPC.bridgeTokenRegenerate),
+
   // ── Fire-and-forget ──────────────────────────────────────────
   metricsEnabled: (): Promise<boolean> =>
     ipcRenderer.invoke(IPC.metricsEnabled),
@@ -79,6 +86,12 @@ contextBridge.exposeInMainWorld('api', {
     const handler = (_event: Electron.IpcRendererEvent, settings: Settings): void => cb(settings)
     ipcRenderer.on(IPC.settingsUpdated, handler)
     return () => ipcRenderer.off(IPC.settingsUpdated, handler)
+  },
+
+  onBridgeStatusUpdated: (cb: (status: BridgeStatus) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: BridgeStatus): void => cb(status)
+    ipcRenderer.on(IPC.bridgeStatusUpdated, handler)
+    return () => ipcRenderer.off(IPC.bridgeStatusUpdated, handler)
   },
 
   // ── Utility ──────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { promises as fs } from 'fs'
+import { randomBytes } from 'crypto'
 import type { Settings, Session, ThemeId } from '../shared/types'
 import { DEFAULT_SETTINGS } from '../shared/types'
 
@@ -37,6 +38,10 @@ async function atomicWrite(filePath: string, data: string): Promise<void> {
 let cachedSettings: Settings | null = null
 let settingsDebounce: ReturnType<typeof setTimeout> | null = null
 
+function isValidBridgeToken(token: unknown): token is string {
+  return typeof token === 'string' && /^[0-9a-f]{64}$/i.test(token)
+}
+
 function clampSettings(s: Settings): Settings {
   s.fontSize = Math.max(8, Math.min(200, Math.round(Number(s.fontSize) || 28)))
   s.lineHeight = Math.max(1.0, Math.min(3.0, Number(s.lineHeight) || 1.5))
@@ -44,6 +49,11 @@ function clampSettings(s: Settings): Settings {
   s.padding = Math.max(0, Math.min(64, Math.round(Number(s.padding) ?? 16)))
   s.opacity = Math.max(0.3, Math.min(1.0, Number(s.opacity) || 1.0))
   s.autoScrollSpeed = Math.max(10, Math.min(400, Math.round(Number(s.autoScrollSpeed) || 60)))
+  s.bridgePort = Math.max(1024, Math.min(65535, Math.round(Number(s.bridgePort) || 47821)))
+  s.bridgeExtensionId = typeof s.bridgeExtensionId === 'string' ? s.bridgeExtensionId.trim() : ''
+  if (!isValidBridgeToken(s.bridgeToken)) {
+    s.bridgeToken = randomBytes(32).toString('hex')
+  }
   if (!VALID_THEMES.has(s.theme)) {
     s.theme = 'obsidian'
   }
@@ -53,9 +63,11 @@ function clampSettings(s: Settings): Settings {
 export async function loadSettings(): Promise<Settings> {
   if (cachedSettings) return cachedSettings
   const settingsPath = getSettingsPath()
+  let needsPersist = false
   try {
     const raw = await fs.readFile(settingsPath, 'utf-8')
     const parsed = JSON.parse(raw) as Partial<Settings>
+    needsPersist = !isValidBridgeToken(parsed.bridgeToken)
     cachedSettings = clampSettings({
       ...DEFAULT_SETTINGS,
       ...parsed,
@@ -74,9 +86,18 @@ export async function loadSettings(): Promise<Settings> {
         /* ignore */
       }
     }
-    cachedSettings = {
+    needsPersist = true
+    cachedSettings = clampSettings({
       ...DEFAULT_SETTINGS,
       shortcuts: { ...DEFAULT_SETTINGS.shortcuts }
+    })
+  }
+  if (needsPersist) {
+    try {
+      await fs.mkdir(getUserDataPath(), { recursive: true })
+      await atomicWrite(settingsPath, JSON.stringify(cachedSettings, null, 2))
+    } catch {
+      /* ignore write error on restricted startup */
     }
   }
   return cachedSettings

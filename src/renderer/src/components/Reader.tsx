@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { Settings, Session, ShortcutId } from '../../../shared/types'
-import { splitSentences, findParagraphStart } from '../lib/sentences'
+import { splitSentences, findParagraphStart, clampSentenceIndex } from '../lib/sentences'
 import { AutoScroller } from '../lib/autoscroll'
 
 interface ReaderProps {
@@ -27,11 +27,18 @@ export default function Reader({
   const [showEnd, setShowEnd] = useState(false)
   const [windowHeight, setWindowHeight] = useState(window.innerHeight)
   const scrollerRef = useRef(new AutoScroller())
+  const savedScrollTopRef = useRef(0)
+  const prevSessionIdRef = useRef<string | null>(currentSession?.id ?? null)
+  const prevScrollAnchorRef = useRef({
+    sessionId: currentSession?.id ?? null,
+    index: 0,
+    pageMode: settings.pageMode,
+    text
+  })
 
   const sentences = useMemo(() => splitSentences(text), [text])
 
-  const clampedIndex =
-    sentences.length === 0 ? 0 : Math.max(0, Math.min(sentenceIndex, sentences.length - 1))
+  const clampedIndex = clampSentenceIndex(sentenceIndex, sentences.length)
 
   useEffect(() => {
     sentenceIndexRef.current = clampedIndex
@@ -43,27 +50,66 @@ export default function Reader({
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // Restore sentence index from session
+  // Initialize sentence index on session switch; preserve & clamp on in-place text updates
   useEffect(() => {
+    const currentId = currentSession?.id ?? null
     const maxIdx = Math.max(0, sentences.length - 1)
-    const initial = currentSession ? Math.max(0, Math.min(currentSession.sentenceIndex, maxIdx)) : 0
-    sentenceIndexRef.current = initial
-    setSentenceIndex(initial)
-    scrollerRef.current.stop()
-    setScrolling(false)
-    setShowEnd(false)
-  }, [text, currentSession?.id, sentences.length])
 
-  // Scroll active sentence into vertical center (scroll mode) or reset scroll to top (page mode)
-  useEffect(() => {
-    if (sentences.length === 0) return
-    if (settings.pageMode) {
-      if (containerRef.current) containerRef.current.scrollTop = 0
+    if (prevSessionIdRef.current !== currentId) {
+      prevSessionIdRef.current = currentId
+      const initial = currentSession ? Math.max(0, Math.min(currentSession.sentenceIndex, maxIdx)) : 0
+      sentenceIndexRef.current = initial
+      setSentenceIndex(initial)
+      savedScrollTopRef.current = 0
+      scrollerRef.current.stop()
+      setScrolling(false)
+      setShowEnd(false)
       return
     }
+
+    setSentenceIndex((prev) => {
+      const next = clampSentenceIndex(prev, sentences.length)
+      sentenceIndexRef.current = next
+      return next
+    })
+  }, [currentSession?.id, sentences.length])
+
+  // Preserve scrollTop on in-place updates; scroll active sentence on navigation or mode/session switch
+  useLayoutEffect(() => {
+    const currentId = currentSession?.id ?? null
+    const prev = prevScrollAnchorRef.current
+    const textChangedInPlace =
+      prev.sessionId === currentId &&
+      prev.pageMode === settings.pageMode &&
+      prev.text !== text
+
+    prevScrollAnchorRef.current = {
+      sessionId: currentId,
+      index: clampedIndex,
+      pageMode: settings.pageMode,
+      text
+    }
+
+    if (sentences.length === 0) return
+
+    if (textChangedInPlace) {
+      if (containerRef.current) {
+        containerRef.current.scrollTop = savedScrollTopRef.current
+      }
+      return
+    }
+
+    if (settings.pageMode) {
+      if (containerRef.current) {
+        containerRef.current.scrollTop = 0
+        savedScrollTopRef.current = 0
+      }
+      return
+    }
+
     const el = containerRef.current?.querySelector(`[data-i="${clampedIndex}"]`)
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [clampedIndex, sentences, settings.pageMode])
+  }, [clampedIndex, currentSession?.id, sentences.length, settings.pageMode, text])
 
   const goToSentence = useCallback(
     (next: number) => {
@@ -220,6 +266,11 @@ export default function Reader({
         tabIndex={0}
         onKeyDown={handleKeyDown}
         onWheel={handleWheel}
+        onScroll={() => {
+          if (containerRef.current) {
+            savedScrollTopRef.current = containerRef.current.scrollTop
+          }
+        }}
         style={{ flex: 1, minHeight: 0, outline: 'none' }}
       >
         <div className="reader-content">

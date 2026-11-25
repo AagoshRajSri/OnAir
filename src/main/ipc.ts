@@ -16,6 +16,11 @@ import { importFile, openFileDialog } from './files'
 import { metrics, isMetricsEnabled } from './metrics'
 import { importFromClipboard, startClipboardWatcher, stopClipboardWatcher } from './clipboard'
 import { registerShortcuts, getShortcutConflicts } from './shortcuts'
+import {
+  generateBridgeToken,
+  getAppBridgeStatus,
+  updateAppBridgeConfig
+} from './bridge'
 
 export function setupIpc(): void {
   ipcMain.handle(IPC.settingsGet, async () => {
@@ -33,6 +38,18 @@ export function setupIpc(): void {
         : current.shortcuts
     }
     await saveSettings(updated)
+
+    if (
+      patch.bridgePort !== undefined ||
+      patch.bridgeToken !== undefined ||
+      patch.bridgeExtensionId !== undefined
+    ) {
+      await updateAppBridgeConfig({
+        port: updated.bridgePort,
+        token: updated.bridgeToken,
+        extensionId: updated.bridgeExtensionId
+      })
+    }
 
     if (win) {
       applyWindowSettings(win, {
@@ -112,5 +129,24 @@ export function setupIpc(): void {
 
   ipcMain.on(IPC.metricsMark, (_e, payload: MetricsMarkPayload) => {
     metrics.handleMark(payload)
+  })
+
+  ipcMain.handle(IPC.bridgeStatusGet, () => {
+    return getAppBridgeStatus()
+  })
+
+  ipcMain.handle(IPC.bridgeTokenRegenerate, async () => {
+    const win = getMainWindow()
+    const current = await loadSettings()
+    const updated: Settings = {
+      ...current,
+      bridgeToken: generateBridgeToken()
+    }
+    await saveSettings(updated)
+    await updateAppBridgeConfig({ token: updated.bridgeToken })
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(IPC.settingsUpdated, updated)
+    }
+    return updated.bridgeToken
   })
 }

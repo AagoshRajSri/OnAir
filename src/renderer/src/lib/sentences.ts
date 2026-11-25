@@ -49,3 +49,8 @@ export function findParagraphStart(segments: SentenceSegment[], currentIndex: nu
   }
 }
 
+export function clampSentenceIndex(index: number, sentenceCount: number): number {
+  if (sentenceCount <= 0) return 0
+  return Math.max(0, Math.min(index, sentenceCount - 1))
+}
+

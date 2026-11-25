@@ -1,9 +1,12 @@
 import { app, nativeTheme } from 'electron'
-import { createReaderWindow, getMainWindow } from './window'
+import { createReaderWindow, deliverContentToWindow, getMainWindow } from './window'
 import { registerShortcuts, unregisterAll } from './shortcuts'
 import { setupIpc } from './ipc'
 import { loadSettings, pruneSessions } from './storage'
 import { startClipboardWatcher } from './clipboard'
+import { startAppBridge, stopAppBridge } from './bridge'
+import { isMetricsEnabled } from './metrics'
+import { IPC } from '../shared/types'
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -17,6 +20,24 @@ app.whenReady().then(async () => {
   setupIpc()
   const win = await createReaderWindow()
   await registerShortcuts()
+
+  await startAppBridge(
+    {
+      port: settings.bridgePort,
+      token: settings.bridgeToken,
+      extensionId: settings.bridgeExtensionId
+    },
+    {
+      metricsEnabled: isMetricsEnabled,
+      onContent: (payload) => deliverContentToWindow(getMainWindow(), payload),
+      onStatusChange: (status) => {
+        const w = getMainWindow()
+        if (w && !w.isDestroyed()) {
+          w.webContents.send(IPC.bridgeStatusUpdated, status)
+        }
+      }
+    }
+  )
 
   if (settings.clipboardWatch) {
     startClipboardWatcher(getMainWindow)
@@ -33,4 +54,5 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   unregisterAll()
+  void stopAppBridge()
 })

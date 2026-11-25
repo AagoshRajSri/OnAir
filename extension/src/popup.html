@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>OnAir Bridge</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 12px;
+        width: 296px;
+        background: #0f1115;
+        color: #e6e8ec;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        font-size: 12px;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      .title {
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: #9aa0a6;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #757575;
+      }
+      .dot.connected {
+        background: #4caf50;
+      }
+      .dot.connecting {
+        background: #ffb74d;
+      }
+      .dot.error {
+        background: #ff5252;
+      }
+      .card {
+        background: #1a1d22;
+        border: 1px solid #2a2d35;
+        border-radius: 6px;
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      label.field {
+        display: block;
+        margin-bottom: 8px;
+      }
+      label.field span {
+        display: block;
+        margin-bottom: 4px;
+        opacity: 0.78;
+        font-size: 11px;
+      }
+      input[type="text"],
+      input[type="number"],
+      input[type="password"] {
+        width: 100%;
+        background: #0f1115;
+        border: 1px solid #343844;
+        border-radius: 4px;
+        color: #e6e8ec;
+        padding: 5px 7px;
+        font-size: 11px;
+      }
+      input.mono {
+        font-family: Consolas, monospace;
+      }
+      button {
+        background: #2a2d35;
+        border: 1px solid #3a3e4a;
+        color: #e6e8ec;
+        border-radius: 4px;
+        padding: 5px 9px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #363a45;
+      }
+      button.primary {
+        width: 100%;
+        background: #2563eb;
+        border-color: #2563eb;
+        color: #fff;
+        font-weight: 500;
+      }
+      button.primary:hover {
+        background: #1d4ed8;
+      }
+      .muted {
+        font-size: 10px;
+        opacity: 0.65;
+        line-height: 1.35;
+      }
+      .error-text {
+        color: #ff8a80;
+        font-size: 10px;
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <span class="title">OnAir Bridge</span>
+      <span class="status">
+        <span id="status-dot" class="dot"></span>
+        <span id="status-text">Checking...</span>
+      </span>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div>
+          <div style="font-weight: 500">Mirror this tab to OnAir</div>
+          <div id="tab-site" class="muted">Checking current tab...</div>
+        </div>
+        <input id="tab-toggle" type="checkbox" />
+      </div>
+    </div>
+
+    <div class="card">
+      <label class="field">
+        <span>Extension ID (paste into OnAir Settings)</span>
+        <div class="row">
+          <input id="ext-id" type="text" class="mono" readonly />
+          <button id="copy-ext-id" type="button">Copy</button>
+        </div>
+      </label>
+
+      <label class="field">
+        <span>Bridge Port (127.0.0.1)</span>
+        <input id="port-input" type="number" min="1024" max="65535" />
+      </label>
+
+      <label class="field" style="margin-bottom: 10px">
+        <span>Pairing Token</span>
+        <input id="token-input" type="password" class="mono" placeholder="64-char hex token from OnAir" />
+      </label>
+
+      <button id="save-btn" type="button" class="primary">Save &amp; Connect</button>
+      <div id="feedback" class="muted" style="margin-top: 6px; min-height: 14px"></div>
+      <div id="error-box" class="error-text" hidden></div>
+    </div>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
+

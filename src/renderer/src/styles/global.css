@@ -321,6 +321,7 @@ body,
 }
 
 .settings-panel input[type="text"],
+.settings-panel input[type="number"],
 .settings-panel input[type="color"],
 .settings-panel select {
   background: #2a2d35;
