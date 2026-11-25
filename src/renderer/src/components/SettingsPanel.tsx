@@ -370,14 +370,14 @@ export default function SettingsPanel({
           </div>
 
           <div className="row">
-            <span>Lock position & size</span>
+            <span>Lock position & keep on top</span>
             <input
               type="checkbox"
               checked={settings.locked}
               onChange={(e) => {
                 const val = e.target.checked
-                onChange({ locked: val, ...(val ? { alwaysOnTop: true } : {}) })
-                window.api.windowApply({ locked: val, ...(val ? { alwaysOnTop: true } : {}) })
+                onChange({ locked: val, alwaysOnTop: val })
+                window.api.windowApply({ locked: val, alwaysOnTop: val })
               }}
             />
           </div>

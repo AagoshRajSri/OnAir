@@ -9,6 +9,13 @@ import { IPC } from '../shared/types'
 
 let boundsTimer: ReturnType<typeof setTimeout> | null = null
 let mainWin: BrowserWindow | null = null
+let suppressAutoHideCount = 0
+
+export function setSuppressAutoHide(suppress: boolean): void {
+  suppressAutoHideCount = suppress
+    ? suppressAutoHideCount + 1
+    : Math.max(0, suppressAutoHideCount - 1)
+}
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWin && !mainWin.isDestroyed() ? mainWin : null
@@ -68,7 +75,7 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
     transparent: false,
     resizable: !settings.locked,
     movable: !settings.locked,
-    alwaysOnTop: settings.alwaysOnTop || settings.locked,
+    alwaysOnTop: settings.locked,
     show: false,
     backgroundColor: '#0f1115',
     webPreferences: {
@@ -81,8 +88,10 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
 
   mainWin = win
 
-  if (settings.alwaysOnTop || settings.locked) {
+  if (settings.locked) {
     win.setAlwaysOnTop(true, 'screen-saver')
+  } else {
+    win.setAlwaysOnTop(false)
   }
 
   win.setOpacity(settings.opacity)
@@ -97,13 +106,19 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
     metrics.end('show-window')
   })
 
-  // Keep locked / always-on-top window pinned above other applications when focus moves elsewhere
+  // When locked, stay pinned on top when focus moves elsewhere; when unlocked, hide/minimize on blur
   win.on('blur', async () => {
     try {
       if (win.isDestroyed()) return
       const s = await loadSettings()
-      if ((s.alwaysOnTop || s.locked) && win.isVisible()) {
-        win.setAlwaysOnTop(true, 'screen-saver')
+      if (s.locked) {
+        if (win.isVisible()) {
+          win.setAlwaysOnTop(true, 'screen-saver')
+        }
+        return
+      }
+      if (suppressAutoHideCount === 0 && !win.webContents.isDevToolsOpened() && win.isVisible()) {
+        win.minimize()
       }
     } catch {
       /* ignore */
@@ -188,7 +203,13 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
         click: () => app.quit()
       }
     ])
-    menu.popup({ window: win })
+    setSuppressAutoHide(true)
+    menu.popup({
+      window: win,
+      callback: () => {
+        setSuppressAutoHide(false)
+      }
+    })
   })
 
   if (process.env['ELECTRON_RENDERER_URL']) {
@@ -236,6 +257,8 @@ export function applyWindowSettings(win: BrowserWindow, payload: WindowApplyPayl
     win.setResizable(!payload.locked)
     if (payload.locked) {
       win.setAlwaysOnTop(true, 'screen-saver')
+    } else {
+      win.setAlwaysOnTop(false)
     }
   }
 

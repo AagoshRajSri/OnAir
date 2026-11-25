@@ -6,20 +6,23 @@ import type { ContentIncomingPayload } from '../shared/types'
 import { importTxt } from './importers/txt'
 import { importPdf } from './importers/pdf'
 import { importDocx } from './importers/docx'
-import { deliverContentToWindow } from './window'
+import { deliverContentToWindow, setSuppressAutoHide } from './window'
 
 const MAX_BYTES = 10_485_760 // 10 MB
 const ALLOWED_EXTENSIONS = new Set(['.txt', '.pdf', '.docx'])
 
 export async function openFileDialog(win: BrowserWindow): Promise<string | null> {
-  const result = await dialog.showOpenDialog(win, {
-    properties: ['openFile'],
-    filters: [
-      { name: 'Text, PDF, Word', extensions: ['txt', 'pdf', 'docx'] }
-    ]
-  })
-  if (result.canceled || result.filePaths.length === 0) return null
-  return result.filePaths[0]
+  setSuppressAutoHide(true)
+  try {
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openFile'],
+      filters: [{ name: 'Text, PDF, Word', extensions: ['txt', 'pdf', 'docx'] }]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  } finally {
+    setSuppressAutoHide(false)
+  }
 }
 
 export async function importFile(filePath: string, win: BrowserWindow): Promise<string> {

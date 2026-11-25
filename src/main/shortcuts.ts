@@ -28,7 +28,11 @@ export async function registerShortcuts(): Promise<ShortcutId[]> {
     toggleWindow: () => {
       const win = getMainWindow()
       if (!win || win.isDestroyed()) return
-      if (win.isVisible()) {
+      if (win.isMinimized()) {
+        metrics.start('show-window')
+        win.restore()
+        win.show()
+      } else if (win.isVisible()) {
         win.hide()
       } else {
         metrics.start('show-window')

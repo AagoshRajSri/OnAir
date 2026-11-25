@@ -232,7 +232,7 @@ export default function App(): ReactElement {
     const nextLocked = !settings.locked
     handleSettingsChange({
       locked: nextLocked,
-      ...(nextLocked ? { alwaysOnTop: true } : {})
+      alwaysOnTop: nextLocked
     })
   }, [settings.locked, handleSettingsChange])
 
