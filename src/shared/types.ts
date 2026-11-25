@@ -38,6 +38,7 @@ export interface Settings {
   clipboardWatch: boolean
   saveWatchedToHistory: boolean
   openInNewWindow: boolean
+  pageMode: boolean
   bounds: { x: number; y: number; width: number; height: number } | null
   shortcuts: Record<ShortcutId, string>
 }
@@ -61,6 +62,7 @@ export const DEFAULT_SETTINGS: Settings = {
   clipboardWatch: false,
   saveWatchedToHistory: false,
   openInNewWindow: false,
+  pageMode: true,
   bounds: null,
   shortcuts: {
     toggleWindow: 'Ctrl+Alt+R',

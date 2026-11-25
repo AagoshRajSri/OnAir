@@ -443,7 +443,18 @@ export default function SettingsPanel({
 
         {/* Auto-scroll */}
         <div className="section">
-          <h2>Auto-scroll</h2>
+          <h2>Reading & Auto-scroll</h2>
+          <div className="row">
+            <span>Page-by-page view</span>
+            <input
+              type="checkbox"
+              checked={settings.pageMode}
+              onChange={(e) => onChange({ pageMode: e.target.checked })}
+            />
+          </div>
+          <div style={{ opacity: 0.65, fontSize: 10, marginBottom: 8, lineHeight: 1.3 }}>
+            Show one statement per page using ← / → arrows. Turn off for continuous scrolling.
+          </div>
           <div className="row">
             <span>Speed: {settings.autoScrollSpeed} px/s</span>
             <input

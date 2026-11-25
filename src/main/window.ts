@@ -217,6 +217,16 @@ export async function createReaderWindow(
           broadcastSettingsUpdated(updated)
         }
       },
+      {
+        label: 'Page-by-page view',
+        type: 'checkbox',
+        checked: s.pageMode,
+        click: async (item) => {
+          const updated: Settings = { ...s, pageMode: item.checked }
+          await saveSettings(updated)
+          broadcastSettingsUpdated(updated)
+        }
+      },
       { type: 'separator' },
       {
         label: s.locked ? 'Unlock position' : 'Lock position',

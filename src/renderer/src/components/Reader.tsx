@@ -54,12 +54,16 @@ export default function Reader({
     setShowEnd(false)
   }, [text, currentSession?.id, sentences.length])
 
-  // Scroll active sentence into vertical center
+  // Scroll active sentence into vertical center (scroll mode) or reset scroll to top (page mode)
   useEffect(() => {
     if (sentences.length === 0) return
+    if (settings.pageMode) {
+      if (containerRef.current) containerRef.current.scrollTop = 0
+      return
+    }
     const el = containerRef.current?.querySelector(`[data-i="${clampedIndex}"]`)
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [clampedIndex, sentences])
+  }, [clampedIndex, sentences, settings.pageMode])
 
   const goToSentence = useCallback(
     (next: number) => {
@@ -219,16 +223,20 @@ export default function Reader({
         style={{ flex: 1, minHeight: 0, outline: 'none' }}
       >
         <div className="reader-content">
-          {sentences.map((seg) => (
-            <span
-              key={seg.index}
-              data-i={seg.index}
-              className={`sentence-span${clampedIndex === seg.index ? ' active' : ''}`}
-              onClick={() => goToSentence(seg.index)}
-            >
-              {seg.text}
-            </span>
-          ))}
+          {settings.pageMode ? (
+            <span data-i={clampedIndex}>{sentences[clampedIndex]?.text.trimStart()}</span>
+          ) : (
+            sentences.map((seg) => (
+              <span
+                key={seg.index}
+                data-i={seg.index}
+                className={`sentence-span${clampedIndex === seg.index ? ' active' : ''}`}
+                onClick={() => goToSentence(seg.index)}
+              >
+                {seg.text}
+              </span>
+            ))
+          )}
         </div>
         {showEnd && <div className="end-banner">End</div>}
       </div>
