@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import type { Settings, Session } from '../../../shared/types'
+import type { Settings, Session, ShortcutId } from '../../../shared/types'
 import { splitSentences, findParagraphStart } from '../lib/sentences'
 import { AutoScroller } from '../lib/autoscroll'
 
@@ -7,6 +7,7 @@ interface ReaderProps {
   text: string
   settings: Settings
   currentSession: Session | null
+  commandEvent: { cmd: ShortcutId; seq: number } | null
   onSentenceChange: (index: number) => void
   onSettingsChange: (patch: Partial<Settings>) => void
 }
@@ -15,6 +16,7 @@ export default function Reader({
   text,
   settings,
   currentSession,
+  commandEvent,
   onSentenceChange,
   onSettingsChange
 }: ReaderProps): ReactElement {
@@ -38,6 +40,11 @@ export default function Reader({
     setShowEnd(false)
   }, [text, currentSession?.id])
 
+  // Update auto-scroll speed dynamically if changed in settings while scrolling
+  useEffect(() => {
+    scrollerRef.current.setSpeed(settings.autoScrollSpeed)
+  }, [settings.autoScrollSpeed])
+
   // Scroll active sentence into vertical center
   useEffect(() => {
     if (sentences.length === 0) return
@@ -48,15 +55,11 @@ export default function Reader({
   // Autoscroll control
   const startScroll = useCallback(() => {
     if (!containerRef.current) return
-    scrollerRef.current.start(
-      containerRef.current,
-      settings.autoScrollSpeed,
-      () => {
-        setScrolling(false)
-        setShowEnd(true)
-        setTimeout(() => setShowEnd(false), 1500)
-      }
-    )
+    scrollerRef.current.start(containerRef.current, settings.autoScrollSpeed, () => {
+      setScrolling(false)
+      setShowEnd(true)
+      setTimeout(() => setShowEnd(false), 1500)
+    })
     setScrolling(true)
   }, [settings.autoScrollSpeed])
 
@@ -70,7 +73,37 @@ export default function Reader({
     else startScroll()
   }, [scrolling, startScroll, stopScroll])
 
-  // Keyboard navigation
+  const stepSentence = useCallback(
+    (delta: 1 | -1) => {
+      if (sentences.length === 0) return
+      setSentenceIndex((curr) => {
+        const next = Math.max(0, Math.min(curr + delta, sentences.length - 1))
+        onSentenceChange(next)
+        return next
+      })
+    },
+    [sentences.length, onSentenceChange]
+  )
+
+  // Handle global shortcut commands forwarded from App
+  useEffect(() => {
+    if (!commandEvent) return
+    switch (commandEvent.cmd) {
+      case 'nextSentence':
+        stepSentence(1)
+        break
+      case 'prevSentence':
+        stepSentence(-1)
+        break
+      case 'toggleScroll':
+        toggleScroll()
+        break
+      default:
+        break
+    }
+  }, [commandEvent, stepSentence, toggleScroll])
+
+  // Keyboard navigation (window focused, not in edit mode)
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (sentences.length === 0) return
@@ -78,16 +111,12 @@ export default function Reader({
       switch (e.key) {
         case 'ArrowRight': {
           e.preventDefault()
-          const next = Math.min(sentenceIndex + 1, sentences.length - 1)
-          setSentenceIndex(next)
-          onSentenceChange(next)
+          stepSentence(1)
           break
         }
         case 'ArrowLeft': {
           e.preventDefault()
-          const prev = Math.max(sentenceIndex - 1, 0)
-          setSentenceIndex(prev)
-          onSentenceChange(prev)
+          stepSentence(-1)
           break
         }
         case 'ArrowDown': {
@@ -124,7 +153,7 @@ export default function Reader({
         }
       }
     },
-    [sentences, sentenceIndex, onSentenceChange, toggleScroll]
+    [sentences, sentenceIndex, stepSentence, onSentenceChange, toggleScroll]
   )
 
   // Ctrl + Wheel font size adjustment (±2 per notch)

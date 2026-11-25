@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
-import type { Settings, Session, ContentIncomingPayload, ShortcutId, WindowApplyPayload } from '../../shared/types'
+import type {
+  Settings,
+  Session,
+  ContentIncomingPayload,
+  ShortcutId,
+  WindowApplyPayload,
+  MetricsMarkPayload
+} from '../../shared/types'
 import { DEFAULT_SETTINGS } from '../../shared/types'
 import { applySettingsToDOM } from './lib/themes'
 import Reader from './components/Reader'
@@ -14,13 +21,16 @@ declare global {
       sessionsList: () => Promise<Session[]>
       sessionLoad: (id: string) => Promise<Session | null>
       sessionSave: (session: Session) => Promise<void>
+      sessionDelete: (id: string) => Promise<void>
       sessionsClear: () => Promise<void>
       fileOpenDialog: () => Promise<string | null>
       fileImport: (filePath: string) => Promise<string>
+      clipboardImport: () => Promise<void>
+      shortcutsConflicts: () => Promise<ShortcutId[]>
       windowApply: (payload: WindowApplyPayload) => Promise<void>
-      metricsMark: (label: string) => void
+      metricsMark: (payload: MetricsMarkPayload) => void
       onContentIncoming: (cb: (payload: ContentIncomingPayload) => void) => () => void
-      onCommand: (cb: (cmd: ShortcutId | string) => void) => () => void
+      onCommand: (cb: (cmd: ShortcutId) => void) => () => void
       onToast: (cb: (msg: string) => void) => () => void
       getPathForFile: (file: File) => string
     }
@@ -31,6 +41,16 @@ function makeTitle(text: string): string {
   const cleaned = text.replace(/[\r\n]+/g, ' ').trim()
   if (!cleaned) return 'Untitled'
   return cleaned.slice(0, 40)
+}
+
+function normalizeDropText(text: string): string {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\x00/g, '')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 export default function App(): ReactElement {
@@ -44,7 +64,10 @@ export default function App(): ReactElement {
   const [windowHeight, setWindowHeight] = useState(window.innerHeight)
   const [isEditing, setIsEditing] = useState(false)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
+  const [commandEvent, setCommandEvent] = useState<{ cmd: ShortcutId; seq: number } | null>(null)
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const sentenceSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cmdSeq = useRef(0)
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
@@ -74,18 +97,19 @@ export default function App(): ReactElement {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Handle incoming content from main process (hotkey, watcher, file)
+  // Handle incoming content from main process (hotkey, watcher, file, or drop-text)
   const handleNewContent = useCallback(
     (payload: ContentIncomingPayload) => {
-      window.api.metricsMark('content:start')
+      const receiveTime = performance.timeOrigin + performance.now()
 
-      // Save previous session ID for Back navigation
       if (currentSession) {
         setPreviousSessionId(currentSession.id)
       }
 
       const newSession: Session = {
-        id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        id: crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
         title: payload.fileName ? payload.fileName.slice(0, 40) : makeTitle(payload.text),
         source: payload.source,
         fileName: payload.fileName,
@@ -105,7 +129,19 @@ export default function App(): ReactElement {
 
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          window.api.metricsMark('content:start')
+          const paintedTime = performance.timeOrigin + performance.now()
+          window.api.metricsMark({
+            metric: 'content-display',
+            phase: 'duration',
+            timeMs: paintedTime - receiveTime
+          })
+          if (payload.source === 'clipboard-hotkey') {
+            window.api.metricsMark({
+              metric: 'clipboard-transfer',
+              phase: 'end',
+              timeMs: paintedTime
+            })
+          }
         })
       })
     },
@@ -130,7 +166,13 @@ export default function App(): ReactElement {
 
   const handleSettingsChange = useCallback(
     async (patch: Partial<Settings>): Promise<void> => {
-      const updated = { ...settings, ...patch }
+      const updated: Settings = {
+        ...settings,
+        ...patch,
+        shortcuts: patch.shortcuts
+          ? { ...settings.shortcuts, ...patch.shortcuts }
+          : settings.shortcuts
+      }
       setSettings(updated)
       applySettingsToDOM(updated)
       await window.api.settingsSet(patch)
@@ -148,19 +190,15 @@ export default function App(): ReactElement {
     }
   }
 
-  // Handle commands from shortcuts or context menu
+  // Handle commands from global shortcuts or context menu
   const handleCommand = useCallback(
-    (cmd: ShortcutId | string): void => {
+    (cmd: ShortcutId): void => {
       switch (cmd) {
         case 'openSettings':
           setShowSettings((v) => !v)
           break
-        case 'openFile':
-          handleOpenFile()
-          break
         case 'toggleLock':
           handleSettingsChange({ locked: !settings.locked })
-          window.api.windowApply({ locked: !settings.locked })
           break
         case 'back':
           handleBack()
@@ -170,6 +208,12 @@ export default function App(): ReactElement {
           break
         case 'fontDown':
           handleSettingsChange({ fontSize: Math.max(8, settings.fontSize - 2) })
+          break
+        case 'nextSentence':
+        case 'prevSentence':
+        case 'toggleScroll':
+          cmdSeq.current += 1
+          setCommandEvent({ cmd, seq: cmdSeq.current })
           break
         default:
           break
@@ -181,7 +225,7 @@ export default function App(): ReactElement {
   // Register push listeners
   useEffect(() => {
     const unContent = window.api.onContentIncoming(handleNewContent)
-    const unCommand = window.api.onCommand((cmd) => handleCommand(cmd))
+    const unCommand = window.api.onCommand(handleCommand)
     const unToast = window.api.onToast((msg) => showToast(msg))
 
     return () => {
@@ -191,10 +235,10 @@ export default function App(): ReactElement {
     }
   }, [handleNewContent, handleCommand, showToast])
 
-  // Global keydown (Ctrl+E for Edit)
+  // Local keydown (Ctrl+E for Edit)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.ctrlKey && (e.key === 'e' || e.key === 'E')) {
+      if (e.ctrlKey && !e.altKey && (e.key === 'e' || e.key === 'E')) {
         e.preventDefault()
         setIsEditing((v) => !v)
       }
@@ -206,7 +250,7 @@ export default function App(): ReactElement {
   const handleEditSave = useCallback(
     async (newText: string): Promise<void> => {
       setIsEditing(false)
-      // Only normalize line endings and NUL per section 6.5
+      // Edit-mode saves apply only steps 1 and 2 (line endings + NUL) per §6.5
       const normalized = newText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\x00/g, '')
 
       if (currentSession) {
@@ -237,14 +281,23 @@ export default function App(): ReactElement {
     [currentSession]
   )
 
+  // Save session 500ms after sentenceIndex last changed (§7.4)
   const handleSentenceChange = useCallback(
-    async (index: number): Promise<void> => {
+    (index: number): void => {
       if (!currentSession) return
       const updated = { ...currentSession, sentenceIndex: index, updatedAt: Date.now() }
       setCurrentSession(updated)
-      await window.api.sessionSave(updated)
+
+      if (updated.source === 'clipboard-watch' && !settings.saveWatchedToHistory) {
+        return
+      }
+
+      if (sentenceSaveTimer.current) clearTimeout(sentenceSaveTimer.current)
+      sentenceSaveTimer.current = setTimeout(() => {
+        window.api.sessionSave(updated)
+      }, 500)
     },
-    [currentSession]
+    [currentSession, settings.saveWatchedToHistory]
   )
 
   // Drag and drop handlers
@@ -270,9 +323,9 @@ export default function App(): ReactElement {
       const dropText = e.dataTransfer.getData('text/plain')
       if (dropText) {
         handleNewContent({
-          text: dropText,
+          text: normalizeDropText(dropText),
           source: 'drop-text',
-          sentAt: Date.now()
+          sentAt: performance.timeOrigin + performance.now()
         })
       }
     },
@@ -306,9 +359,11 @@ export default function App(): ReactElement {
       {/* 12px drag strip across top with CSS -webkit-app-region: drag */}
       <div
         className="drag-strip"
-        style={{
-          WebkitAppRegion: settings.locked ? 'no-drag' : 'drag'
-        } as React.CSSProperties}
+        style={
+          {
+            WebkitAppRegion: settings.locked ? 'no-drag' : 'drag'
+          } as React.CSSProperties
+        }
       >
         {settings.clipboardWatch && <div className="watch-dot" />}
       </div>
@@ -317,12 +372,10 @@ export default function App(): ReactElement {
       {showToolbar && windowHeight >= 100 && !isEditing && (
         <Toolbar
           onOpenFile={handleOpenFile}
-          onImportClipboard={() => {
-            /* Triggered via IPC or menu */
-          }}
+          onImportClipboard={() => window.api.clipboardImport()}
           onEdit={() => setIsEditing(true)}
           onSettings={() => setShowSettings((v) => !v)}
-          onHide={() => window.api.windowApply({ opacity: 0 })}
+          onHide={() => window.api.windowApply({ hidden: true })}
         />
       )}
 
@@ -346,6 +399,7 @@ export default function App(): ReactElement {
           text={text}
           settings={settings}
           currentSession={currentSession}
+          commandEvent={commandEvent}
           onSentenceChange={handleSentenceChange}
           onSettingsChange={handleSettingsChange}
         />
@@ -357,6 +411,7 @@ export default function App(): ReactElement {
           settings={settings}
           onChange={handleSettingsChange}
           onClose={() => setShowSettings(false)}
+          showToast={showToast}
           onSelectSession={async (id) => {
             const s = await window.api.sessionLoad(id)
             if (s) {

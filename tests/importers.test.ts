@@ -2,11 +2,12 @@ import { describe, it, expect, vi } from 'vitest'
 import { join } from 'path'
 import { importTxt } from '../src/main/importers/txt'
 import { importPdf } from '../src/main/importers/pdf'
+import { importDocx } from '../src/main/importers/docx'
 import { importFile } from '../src/main/files'
 
 const fixturesDir = join(__dirname, '../fixtures')
 
-describe('File Importers Real-World Parsing', () => {
+describe('File Importers Parsing', () => {
   it('decodes UTF-8 text with BOM properly', async () => {
     const text = await importTxt(join(fixturesDir, 'sample-utf8.txt'))
     expect(text).toContain('Hello from OnAir!')
@@ -47,6 +48,34 @@ describe('File Importers Real-World Parsing', () => {
     expect(mockWin.webContents.send).toHaveBeenCalledWith(
       'toast',
       'This PDF has no selectable text (it may be scanned). OCR is planned for a later phase.'
+    )
+  })
+
+  it('extracts all paragraphs from a DOCX file', async () => {
+    const mockWin = {
+      webContents: {
+        send: vi.fn()
+      }
+    } as any
+
+    const text = await importDocx(join(fixturesDir, 'sample.docx'), mockWin)
+    expect(text).toContain('First paragraph in DOCX.')
+    expect(text).toContain('Second paragraph in DOCX.')
+  })
+
+  it('emits toast on unreadable DOCX file', async () => {
+    const mockWin = {
+      webContents: {
+        send: vi.fn()
+      }
+    } as any
+
+    await expect(importDocx(join(fixturesDir, 'corrupt.docx'), mockWin)).rejects.toThrow(
+      'Could not read this Word file.'
+    )
+    expect(mockWin.webContents.send).toHaveBeenCalledWith(
+      'toast',
+      'Could not read this Word file.'
     )
   })
 

@@ -3,21 +3,33 @@ import type { ShortcutId } from '../shared/types'
 import { IPC } from '../shared/types'
 import { loadSettings } from './storage'
 import { importFromClipboard } from './clipboard'
+import { metrics } from './metrics'
 
 let registeredKeys: string[] = []
+let currentConflicts: ShortcutId[] = []
 
-export async function registerShortcuts(win: BrowserWindow): Promise<void> {
+export function getShortcutConflicts(): ShortcutId[] {
+  return [...currentConflicts]
+}
+
+export async function registerShortcuts(win: BrowserWindow): Promise<ShortcutId[]> {
   unregisterAll()
   const settings = await loadSettings()
 
   const shortcutMap: Record<ShortcutId, () => void> = {
     toggleWindow: () => {
       if (win.isDestroyed()) return
-      if (win.isVisible()) win.hide()
-      else win.show()
+      if (win.isVisible()) {
+        win.hide()
+      } else {
+        metrics.start('show-window')
+        win.show()
+      }
     },
     importClipboard: () => {
-      if (!win.isDestroyed()) importFromClipboard(win)
+      if (win.isDestroyed()) return
+      metrics.start('clipboard-transfer')
+      importFromClipboard(win)
     },
     fontUp: () => {
       if (!win.isDestroyed()) win.webContents.send(IPC.command, 'fontUp' satisfies ShortcutId)
@@ -57,9 +69,8 @@ export async function registerShortcuts(win: BrowserWindow): Promise<void> {
     }
   }
 
-  if (conflicts.length > 0 && !win.isDestroyed()) {
-    win.webContents.send(IPC.toast, `Shortcut conflict: ${conflicts.join(', ')} in use by another app`)
-  }
+  currentConflicts = conflicts
+  return conflicts
 }
 
 export function unregisterAll(): void {

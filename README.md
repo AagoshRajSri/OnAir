@@ -50,7 +50,7 @@
 - `sandbox: true`
 - All preload APIs are strictly exposed via `contextBridge` (`window.api`).
 - No external network calls, remote content, or API keys in Phase 1.
-- `setContentProtection` is **never** called, ensuring the window remains visible in screen shares and recordings.
+- Content protection / capture-hiding APIs are **never** called, ensuring the window remains visible in screen shares and recordings.
 
 ---
 
@@ -96,3 +96,4 @@ $env:FR_METRICS="1"
 npm start
 ```
 Timestamps and durations are recorded to `latency-results.csv` in the app's `userData` folder.
+

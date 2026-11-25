@@ -1,6 +1,9 @@
 import { BrowserWindow, screen, Menu, type Rectangle } from 'electron'
 import { join } from 'path'
 import { loadSettings, saveSettings } from './storage'
+import { openFileDialog, importFile } from './files'
+import { importFromClipboard } from './clipboard'
+import { metrics } from './metrics'
 import type { Settings, WindowApplyPayload } from '../shared/types'
 import { IPC } from '../shared/types'
 
@@ -75,6 +78,11 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
     win.show()
   })
 
+  // Record show-window end metric when window becomes visible
+  win.on('show', () => {
+    metrics.end('show-window')
+  })
+
   // Save bounds debounced 300ms on resize & move
   const handleBoundsChange = (): void => {
     if (boundsTimer) clearTimeout(boundsTimer)
@@ -103,11 +111,16 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
       },
       {
         label: 'Open file',
-        click: () => win.webContents.send(IPC.command, 'openFile')
+        click: async () => {
+          const filePath = await openFileDialog(win)
+          if (filePath) {
+            await importFile(filePath, win).catch(() => {})
+          }
+        }
       },
       {
         label: 'Import clipboard',
-        click: () => win.webContents.send(IPC.command, 'importClipboard')
+        click: () => importFromClipboard(win)
       },
       { type: 'separator' },
       {
@@ -147,6 +160,11 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
 }
 
 export function applyWindowSettings(win: BrowserWindow, payload: WindowApplyPayload): void {
+  if (payload.hidden) {
+    win.hide()
+    return
+  }
+
   if (payload.opacity !== undefined) {
     const op = Math.max(0.3, Math.min(1.0, payload.opacity))
     win.setOpacity(op)

@@ -1,19 +1,21 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { IPC } from '../shared/types'
-import type { Settings, Session, WindowApplyPayload } from '../shared/types'
+import type { Settings, Session, WindowApplyPayload, MetricsMarkPayload } from '../shared/types'
 import {
   loadSettings,
   saveSettings,
   listSessions,
   loadSession,
   saveSession,
+  deleteSession,
   clearSessions,
   pruneSessions
 } from './storage'
 import { applyWindowSettings } from './window'
 import { importFile, openFileDialog } from './files'
 import { metrics } from './metrics'
-import { startClipboardWatcher, stopClipboardWatcher } from './clipboard'
+import { importFromClipboard, startClipboardWatcher, stopClipboardWatcher } from './clipboard'
+import { registerShortcuts, getShortcutConflicts } from './shortcuts'
 
 export function setupIpc(win: BrowserWindow): void {
   ipcMain.handle(IPC.settingsGet, async () => {
@@ -22,7 +24,13 @@ export function setupIpc(win: BrowserWindow): void {
 
   ipcMain.handle(IPC.settingsSet, async (_e, patch: Partial<Settings>) => {
     const current = await loadSettings()
-    const updated = { ...current, ...patch }
+    const updated: Settings = {
+      ...current,
+      ...patch,
+      shortcuts: patch.shortcuts
+        ? { ...current.shortcuts, ...patch.shortcuts }
+        : current.shortcuts
+    }
     await saveSettings(updated)
     applyWindowSettings(win, {
       opacity: patch.opacity,
@@ -36,6 +44,10 @@ export function setupIpc(win: BrowserWindow): void {
       } else {
         stopClipboardWatcher()
       }
+    }
+
+    if (patch.shortcuts !== undefined) {
+      await registerShortcuts(win)
     }
   })
 
@@ -52,6 +64,10 @@ export function setupIpc(win: BrowserWindow): void {
     await pruneSessions()
   })
 
+  ipcMain.handle(IPC.sessionDelete, async (_e, id: string) => {
+    await deleteSession(id)
+  })
+
   ipcMain.handle(IPC.sessionsClear, async () => {
     await clearSessions()
   })
@@ -64,11 +80,19 @@ export function setupIpc(win: BrowserWindow): void {
     return importFile(filePath, win)
   })
 
+  ipcMain.handle(IPC.clipboardImport, async () => {
+    importFromClipboard(win)
+  })
+
+  ipcMain.handle(IPC.shortcutsConflicts, async () => {
+    return getShortcutConflicts()
+  })
+
   ipcMain.handle(IPC.windowApply, async (_e, payload: WindowApplyPayload) => {
     applyWindowSettings(win, payload)
   })
 
-  ipcMain.on(IPC.metricsMark, (_e, label: string) => {
-    metrics.mark(label)
+  ipcMain.on(IPC.metricsMark, (_e, payload: MetricsMarkPayload) => {
+    metrics.handleMark(payload)
   })
 }

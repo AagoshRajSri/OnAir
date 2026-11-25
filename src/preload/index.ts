@@ -4,7 +4,8 @@ import type {
   Session,
   ShortcutId,
   ContentIncomingPayload,
-  WindowApplyPayload
+  WindowApplyPayload,
+  MetricsMarkPayload
 } from '../shared/types'
 import { IPC } from '../shared/types'
 
@@ -26,6 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   sessionSave: (session: Session): Promise<void> =>
     ipcRenderer.invoke(IPC.sessionSave, session),
 
+  sessionDelete: (id: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.sessionDelete, id),
+
   sessionsClear: (): Promise<void> =>
     ipcRenderer.invoke(IPC.sessionsClear),
 
@@ -35,12 +39,18 @@ contextBridge.exposeInMainWorld('api', {
   fileImport: (filePath: string): Promise<string> =>
     ipcRenderer.invoke(IPC.fileImport, filePath),
 
+  clipboardImport: (): Promise<void> =>
+    ipcRenderer.invoke(IPC.clipboardImport),
+
+  shortcutsConflicts: (): Promise<ShortcutId[]> =>
+    ipcRenderer.invoke(IPC.shortcutsConflicts),
+
   windowApply: (payload: WindowApplyPayload): Promise<void> =>
     ipcRenderer.invoke(IPC.windowApply, payload),
 
   // ── Fire-and-forget ──────────────────────────────────────────
-  metricsMark: (label: string): void => {
-    ipcRenderer.send(IPC.metricsMark, label)
+  metricsMark: (payload: MetricsMarkPayload): void => {
+    ipcRenderer.send(IPC.metricsMark, payload)
   },
 
   // ── Main → renderer push (return removal function) ───────────

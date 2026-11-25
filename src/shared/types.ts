@@ -91,9 +91,12 @@ export const IPC = {
   sessionsList: 'sessions:list',
   sessionLoad: 'sessions:load',
   sessionSave: 'sessions:save',
+  sessionDelete: 'sessions:delete',
   sessionsClear: 'sessions:clear',
   fileOpenDialog: 'file:open-dialog',
   fileImport: 'file:import',
+  clipboardImport: 'clipboard:import',
+  shortcutsConflicts: 'shortcuts:conflicts',
   contentIncoming: 'content:incoming',
   command: 'command',
   toast: 'toast',
@@ -112,5 +115,12 @@ export interface WindowApplyPayload {
   opacity?: number
   alwaysOnTop?: boolean
   locked?: boolean
+  hidden?: boolean
   sizePreset?: 'Column' | 'Compact' | 'Wide'
+}
+
+export interface MetricsMarkPayload {
+  metric: string
+  phase: 'start' | 'end' | 'duration'
+  timeMs: number
 }

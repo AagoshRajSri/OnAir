@@ -2,6 +2,7 @@ import { clipboard, BrowserWindow } from 'electron'
 import { IPC } from '../shared/types'
 import type { ContentIncomingPayload } from '../shared/types'
 import { normalizeText } from './importers/normalize'
+import { metrics } from './metrics'
 
 const MAX_CHARS = 500_000
 
@@ -27,7 +28,7 @@ export function importFromClipboard(win: BrowserWindow): void {
   const payload: ContentIncomingPayload = {
     text: cleaned,
     source: 'clipboard-hotkey',
-    sentAt: Date.now()
+    sentAt: metrics.now()
   }
   win.webContents.send(IPC.contentIncoming, payload)
 }
@@ -42,7 +43,7 @@ export function startClipboardWatcher(win: BrowserWindow): void {
       return
     }
 
-    // Password manager check
+    // Password manager exclusion check (Microsoft documented clipboard format)
     try {
       const exclusion = clipboard.readBuffer('ExcludeClipboardContentFromMonitorProcessing')
       if (exclusion && exclusion.length > 0) return
@@ -60,7 +61,7 @@ export function startClipboardWatcher(win: BrowserWindow): void {
     const payload: ContentIncomingPayload = {
       text: cleaned,
       source: 'clipboard-watch',
-      sentAt: Date.now()
+      sentAt: metrics.now()
     }
     win.webContents.send(IPC.contentIncoming, payload)
   }, 500)

@@ -30,12 +30,12 @@ let cachedSettings: Settings | null = null
 let settingsDebounce: ReturnType<typeof setTimeout> | null = null
 
 function clampSettings(s: Settings): Settings {
-  s.fontSize = Math.max(8, Math.min(200, Math.round(s.fontSize || 28)))
+  s.fontSize = Math.max(8, Math.min(200, Math.round(Number(s.fontSize) || 28)))
   s.lineHeight = Math.max(1.0, Math.min(3.0, Number(s.lineHeight) || 1.5))
   s.letterSpacing = Math.max(-2, Math.min(10, Number(s.letterSpacing) || 0))
-  s.padding = Math.max(0, Math.min(64, Math.round(s.padding || 16)))
+  s.padding = Math.max(0, Math.min(64, Math.round(Number(s.padding) ?? 16)))
   s.opacity = Math.max(0.3, Math.min(1.0, Number(s.opacity) || 1.0))
-  s.autoScrollSpeed = Math.max(10, Math.min(400, Math.round(s.autoScrollSpeed || 60)))
+  s.autoScrollSpeed = Math.max(10, Math.min(400, Math.round(Number(s.autoScrollSpeed) || 60)))
   if (!VALID_THEMES.has(s.theme)) {
     s.theme = 'obsidian'
   }
@@ -47,7 +47,14 @@ export async function loadSettings(): Promise<Settings> {
   try {
     const raw = await fs.readFile(settingsPath, 'utf-8')
     const parsed = JSON.parse(raw) as Partial<Settings>
-    cachedSettings = clampSettings({ ...DEFAULT_SETTINGS, ...parsed })
+    cachedSettings = clampSettings({
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      shortcuts: {
+        ...DEFAULT_SETTINGS.shortcuts,
+        ...(parsed.shortcuts ?? {})
+      }
+    })
   } catch (err: unknown) {
     const e = err as NodeJS.ErrnoException
     if (e.code !== 'ENOENT') {
@@ -58,7 +65,10 @@ export async function loadSettings(): Promise<Settings> {
         /* ignore */
       }
     }
-    cachedSettings = { ...DEFAULT_SETTINGS }
+    cachedSettings = {
+      ...DEFAULT_SETTINGS,
+      shortcuts: { ...DEFAULT_SETTINGS.shortcuts }
+    }
   }
   return cachedSettings
 }
@@ -116,6 +126,15 @@ export async function loadSession(id: string): Promise<Session | null> {
 export async function saveSession(session: Session): Promise<void> {
   await ensureSessionsDir()
   await atomicWrite(join(sessionsDir, `${session.id}.json`), JSON.stringify(session, null, 2))
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  await ensureSessionsDir()
+  try {
+    await fs.unlink(join(sessionsDir, `${id}.json`))
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function clearSessions(): Promise<void> {

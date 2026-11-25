@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import type { Settings, Session, ThemeId } from '../../../shared/types'
+import type { Settings, Session, ThemeId, ShortcutId } from '../../../shared/types'
 import { THEME_PRESETS } from '../lib/themes'
 
 interface SettingsPanelProps {
   settings: Settings
   onChange: (patch: Partial<Settings>) => void
   onClose: () => void
-  onSelectSession: (id: string) => void
+  onSelectSession: (id: string) => Promise<void>
+  showToast: (msg: string) => void
 }
 
 const FONT_OPTIONS = [
@@ -20,22 +21,119 @@ const FONT_OPTIONS = [
   'Verdana'
 ]
 
+const SHORTCUT_LABELS: Record<ShortcutId, string> = {
+  toggleWindow: 'Show / Hide',
+  importClipboard: 'Import clipboard',
+  fontUp: 'Font size +2',
+  fontDown: 'Font size -2',
+  nextSentence: 'Next sentence',
+  prevSentence: 'Previous sentence',
+  toggleScroll: 'Start / Pause scroll',
+  toggleLock: 'Lock position',
+  back: 'Back',
+  openSettings: 'Open settings'
+}
+
+function keyEventToAccelerator(e: React.KeyboardEvent): string | null {
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return null
+  if (!e.ctrlKey && !e.altKey) return null
+
+  const parts: string[] = []
+  if (e.ctrlKey) parts.push('Ctrl')
+  if (e.altKey) parts.push('Alt')
+  if (e.shiftKey) parts.push('Shift')
+
+  let key = e.key
+  if (key === ' ') key = 'Space'
+  else if (key === 'ArrowUp') key = 'Up'
+  else if (key === 'ArrowDown') key = 'Down'
+  else if (key === 'ArrowLeft') key = 'Left'
+  else if (key === 'ArrowRight') key = 'Right'
+  else if (key.length === 1) key = key.toUpperCase()
+
+  parts.push(key)
+  return parts.join('+')
+}
+
 export default function SettingsPanel({
   settings,
   onChange,
   onClose,
-  onSelectSession
+  onSelectSession,
+  showToast
 }: SettingsPanelProps): ReactElement {
   const [sessions, setSessions] = useState<Session[]>([])
+  const [conflicts, setConflicts] = useState<ShortcutId[]>([])
+  const [recordingId, setRecordingId] = useState<ShortcutId | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const isCustomFont = !FONT_OPTIONS.includes(settings.fontFamily)
 
   useEffect(() => {
     window.api.sessionsList().then(setSessions)
-  }, [])
+    window.api.shortcutsConflicts().then(setConflicts)
+  }, [settings.shortcuts])
 
   const applySizePreset = async (preset: 'Column' | 'Compact' | 'Wide'): Promise<void> => {
     await window.api.windowApply({ sizePreset: preset })
+  }
+
+  const handleShortcutKeyDown = (id: ShortcutId, e: React.KeyboardEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (e.key === 'Escape') {
+      setRecordingId(null)
+      return
+    }
+
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return
+
+    if (!e.ctrlKey && !e.altKey) {
+      showToast('Shortcut must include Ctrl or Alt.')
+      return
+    }
+
+    const accel = keyEventToAccelerator(e)
+    if (!accel) return
+
+    const duplicate = (Object.entries(settings.shortcuts) as [ShortcutId, string][]).find(
+      ([otherId, otherAccel]) => otherId !== id && otherAccel.toLowerCase() === accel.toLowerCase()
+    )
+    if (duplicate) {
+      showToast('Shortcut already assigned to another action.')
+      return
+    }
+
+    setRecordingId(null)
+    onChange({
+      shortcuts: {
+        ...settings.shortcuts,
+        [id]: accel
+      }
+    })
+  }
+
+  const handleThemeSelect = (t: (typeof THEME_PRESETS)[number]): void => {
+    const t0 = performance.timeOrigin + performance.now()
+    onChange({ theme: t.id as ThemeId, bgColor: t.bg, textColor: t.text })
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const t1 = performance.timeOrigin + performance.now()
+        window.api.metricsMark({ metric: 'theme-switch', phase: 'duration', timeMs: t1 - t0 })
+      })
+    })
+  }
+
+  const handleSessionClick = async (id: string): Promise<void> => {
+    const t0 = performance.timeOrigin + performance.now()
+    await onSelectSession(id)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const t1 = performance.timeOrigin + performance.now()
+        window.api.metricsMark({ metric: 'session-switch', phase: 'duration', timeMs: t1 - t0 })
+      })
+    })
+    onClose()
   }
 
   return (
@@ -141,7 +239,9 @@ export default function SettingsPanel({
             <select
               value={isCustomFont ? 'custom' : settings.fontFamily}
               onChange={(e) => {
-                if (e.target.value !== 'custom') {
+                if (e.target.value === 'custom') {
+                  onChange({ fontFamily: '' })
+                } else {
                   onChange({ fontFamily: e.target.value })
                 }
               }}
@@ -182,9 +282,7 @@ export default function SettingsPanel({
                 name="theme"
                 value={t.id}
                 checked={settings.theme === t.id}
-                onChange={() => {
-                  onChange({ theme: t.id as ThemeId, bgColor: t.bg, textColor: t.text })
-                }}
+                onChange={() => handleThemeSelect(t)}
               />
               <span
                 style={{
@@ -357,6 +455,9 @@ export default function SettingsPanel({
               onChange={(e) => onChange({ clipboardWatch: e.target.checked })}
             />
           </div>
+          <div style={{ opacity: 0.65, fontSize: 10, marginBottom: 6, lineHeight: 1.3 }}>
+            The watcher may import copied passwords; leave it off when using a password manager.
+          </div>
           {settings.clipboardWatch && (
             <div className="row">
               <span>Save watched to history</span>
@@ -367,9 +468,44 @@ export default function SettingsPanel({
               />
             </div>
           )}
-          <div style={{ opacity: 0.5, fontSize: 10, marginTop: 4, lineHeight: 1.3 }}>
-            The watcher may import copied passwords; leave it off when using a password manager.
-          </div>
+        </div>
+
+        {/* Shortcuts */}
+        <div className="section">
+          <h2>Global Shortcuts</h2>
+          {(Object.keys(SHORTCUT_LABELS) as ShortcutId[]).map((id) => {
+            const hasConflict = conflicts.includes(id)
+            const isRecording = recordingId === id
+            return (
+              <div key={id} style={{ marginBottom: 6 }}>
+                <div className="row" style={{ marginBottom: 2 }}>
+                  <span style={{ fontSize: 11 }}>{SHORTCUT_LABELS[id]}</span>
+                  <button
+                    onClick={() => setRecordingId(isRecording ? null : id)}
+                    onKeyDown={(e) => {
+                      if (isRecording) handleShortcutKeyDown(id, e)
+                    }}
+                    style={{
+                      background: isRecording ? '#384b68' : '#2a2d35',
+                      border: '1px solid #3a3d48',
+                      color: '#e6e8ec',
+                      cursor: 'pointer',
+                      borderRadius: 3,
+                      padding: '2px 6px',
+                      fontSize: 10
+                    }}
+                  >
+                    {isRecording ? 'Press keys…' : settings.shortcuts[id]}
+                  </button>
+                </div>
+                {hasConflict && (
+                  <div style={{ color: '#ff8a65', fontSize: 10, textAlign: 'right' }}>
+                    In use by another app
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
 
         {/* History */}
@@ -383,15 +519,13 @@ export default function SettingsPanel({
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
+                gap: 6,
                 marginBottom: 6,
                 fontSize: 11
               }}
             >
               <button
-                onClick={() => {
-                  onSelectSession(s.id)
-                  onClose()
-                }}
+                onClick={() => handleSessionClick(s.id)}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -404,8 +538,26 @@ export default function SettingsPanel({
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap'
                 }}
+                title={`${s.title} (${new Date(s.updatedAt).toLocaleString()})`}
               >
-                {s.title}
+                {s.title} · {new Date(s.updatedAt).toLocaleDateString()}
+              </button>
+              <button
+                onClick={async () => {
+                  await window.api.sessionDelete(s.id)
+                  setSessions((prev) => prev.filter((item) => item.id !== s.id))
+                }}
+                title="Delete session"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#888',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  padding: '0 4px'
+                }}
+              >
+                ✕
               </button>
             </div>
           ))}
