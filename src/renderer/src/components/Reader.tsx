@@ -22,35 +22,56 @@ export default function Reader({
 }: ReaderProps): ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const [sentenceIndex, setSentenceIndex] = useState(0)
+  const sentenceIndexRef = useRef(0)
   const [scrolling, setScrolling] = useState(false)
   const [showEnd, setShowEnd] = useState(false)
+  const [windowHeight, setWindowHeight] = useState(window.innerHeight)
   const scrollerRef = useRef(new AutoScroller())
 
   const sentences = useMemo(() => splitSentences(text), [text])
 
+  const clampedIndex =
+    sentences.length === 0 ? 0 : Math.max(0, Math.min(sentenceIndex, sentences.length - 1))
+
+  useEffect(() => {
+    sentenceIndexRef.current = clampedIndex
+  }, [clampedIndex])
+
+  useEffect(() => {
+    const onResize = (): void => setWindowHeight(window.innerHeight)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
   // Restore sentence index from session
   useEffect(() => {
-    if (currentSession) {
-      setSentenceIndex(currentSession.sentenceIndex)
-    } else {
-      setSentenceIndex(0)
-    }
+    const maxIdx = Math.max(0, sentences.length - 1)
+    const initial = currentSession ? Math.max(0, Math.min(currentSession.sentenceIndex, maxIdx)) : 0
+    sentenceIndexRef.current = initial
+    setSentenceIndex(initial)
     scrollerRef.current.stop()
     setScrolling(false)
     setShowEnd(false)
-  }, [text, currentSession?.id])
-
-  // Update auto-scroll speed dynamically if changed in settings while scrolling
-  useEffect(() => {
-    scrollerRef.current.setSpeed(settings.autoScrollSpeed)
-  }, [settings.autoScrollSpeed])
+  }, [text, currentSession?.id, sentences.length])
 
   // Scroll active sentence into vertical center
   useEffect(() => {
     if (sentences.length === 0) return
-    const el = containerRef.current?.querySelector(`[data-i="${sentenceIndex}"]`)
+    const el = containerRef.current?.querySelector(`[data-i="${clampedIndex}"]`)
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [sentenceIndex, sentences])
+  }, [clampedIndex, sentences])
+
+  const goToSentence = useCallback(
+    (next: number) => {
+      if (sentences.length === 0) return
+      const target = Math.max(0, Math.min(next, sentences.length - 1))
+      if (target === sentenceIndexRef.current) return
+      sentenceIndexRef.current = target
+      setSentenceIndex(target)
+      onSentenceChange(target)
+    },
+    [sentences.length, onSentenceChange]
+  )
 
   // Autoscroll control
   const startScroll = useCallback(() => {
@@ -91,14 +112,9 @@ export default function Reader({
 
   const stepSentence = useCallback(
     (delta: 1 | -1) => {
-      if (sentences.length === 0) return
-      setSentenceIndex((curr) => {
-        const next = Math.max(0, Math.min(curr + delta, sentences.length - 1))
-        onSentenceChange(next)
-        return next
-      })
+      goToSentence(sentenceIndexRef.current + delta)
     },
-    [sentences.length, onSentenceChange]
+    [goToSentence]
   )
 
   // Handle global shortcut commands forwarded from App
@@ -137,29 +153,22 @@ export default function Reader({
         }
         case 'ArrowDown': {
           e.preventDefault()
-          const next = findParagraphStart(sentences, sentenceIndex, 1)
-          setSentenceIndex(next)
-          onSentenceChange(next)
+          goToSentence(findParagraphStart(sentences, sentenceIndexRef.current, 1))
           break
         }
         case 'ArrowUp': {
           e.preventDefault()
-          const prev = findParagraphStart(sentences, sentenceIndex, -1)
-          setSentenceIndex(prev)
-          onSentenceChange(prev)
+          goToSentence(findParagraphStart(sentences, sentenceIndexRef.current, -1))
           break
         }
         case 'Home': {
           e.preventDefault()
-          setSentenceIndex(0)
-          onSentenceChange(0)
+          goToSentence(0)
           break
         }
         case 'End': {
           e.preventDefault()
-          const last = sentences.length - 1
-          setSentenceIndex(last)
-          onSentenceChange(last)
+          goToSentence(sentences.length - 1)
           break
         }
         case ' ': {
@@ -169,7 +178,7 @@ export default function Reader({
         }
       }
     },
-    [sentences, sentenceIndex, stepSentence, onSentenceChange, toggleScroll]
+    [sentences, stepSentence, goToSentence, toggleScroll]
   )
 
   // Ctrl + Wheel font size adjustment (±2 per notch)
@@ -197,31 +206,64 @@ export default function Reader({
     )
   }
 
+  const showNavBar = sentences.length > 0 && windowHeight >= 72
+
   return (
-    <div
-      className="reader-container"
-      ref={containerRef}
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-      onWheel={handleWheel}
-      style={{ flex: 1, outline: 'none' }}
-    >
-      <div className="reader-content">
-        {sentences.map((seg) => (
-          <span
-            key={seg.index}
-            data-i={seg.index}
-            className={`sentence-span${sentenceIndex === seg.index ? ' active' : ''}`}
-            onClick={() => {
-              setSentenceIndex(seg.index)
-              onSentenceChange(seg.index)
-            }}
-          >
-            {seg.text}
-          </span>
-        ))}
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <div
+        className="reader-container"
+        ref={containerRef}
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+        onWheel={handleWheel}
+        style={{ flex: 1, minHeight: 0, outline: 'none' }}
+      >
+        <div className="reader-content">
+          {sentences.map((seg) => (
+            <span
+              key={seg.index}
+              data-i={seg.index}
+              className={`sentence-span${clampedIndex === seg.index ? ' active' : ''}`}
+              onClick={() => goToSentence(seg.index)}
+            >
+              {seg.text}
+            </span>
+          ))}
+        </div>
+        {showEnd && <div className="end-banner">End</div>}
       </div>
-      {showEnd && <div className="end-banner">End</div>}
+
+      {showNavBar && (
+        <div className="reader-nav-bar">
+          <button
+            type="button"
+            className="reader-nav-btn"
+            aria-label="Previous sentence"
+            title="Previous sentence (Left / Ctrl+Alt+Left)"
+            disabled={clampedIndex <= 0}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => stepSentence(-1)}
+          >
+            ←
+          </button>
+
+          <span className="reader-nav-count" title="Current statement / Total statements">
+            {clampedIndex + 1} / {sentences.length}
+          </span>
+
+          <button
+            type="button"
+            className="reader-nav-btn"
+            aria-label="Next sentence"
+            title="Next sentence (Right / Ctrl+Alt+Right)"
+            disabled={clampedIndex >= sentences.length - 1}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => stepSentence(1)}
+          >
+            →
+          </button>
+        </div>
+      )}
     </div>
   )
 }

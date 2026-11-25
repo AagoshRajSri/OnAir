@@ -97,13 +97,65 @@ body,
   background: color-mix(in srgb, var(--text-color) 15%, transparent);
 }
 
+/* Bottom sentence navigation bar */
+.reader-nav-bar {
+  -webkit-app-region: no-drag;
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  border-top: 1px solid color-mix(in srgb, var(--text-color) 12%, transparent);
+  background: color-mix(in srgb, var(--bg-color) 92%, var(--text-color) 8%);
+  color: var(--text-color);
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1;
+  user-select: none;
+}
+
+.reader-nav-btn {
+  -webkit-app-region: no-drag;
+  background: none;
+  border: none;
+  color: var(--text-color);
+  opacity: 0.8;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 3px 10px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reader-nav-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--text-color) 12%, transparent);
+}
+
+.reader-nav-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.reader-nav-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
 /* Toast */
 .toast {
   position: fixed;
-  bottom: 8px;
+  bottom: 34px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 0, 0, 0.8);
   color: #fff;
   padding: 4px 12px;
   border-radius: 4px;
