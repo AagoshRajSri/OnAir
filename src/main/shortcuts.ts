@@ -42,7 +42,7 @@ export async function registerShortcuts(): Promise<ShortcutId[]> {
     importClipboard: () => {
       const win = getMainWindow()
       if (win && !win.isDestroyed()) {
-        importFromClipboard(win)
+        void importFromClipboard(win)
       }
     },
     fontUp: () => sendCommand('fontUp'),

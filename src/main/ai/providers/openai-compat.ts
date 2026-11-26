@@ -66,6 +66,6 @@ export const openaiAdapter = createOpenAICompatAdapter(
 export const groqAdapter = createOpenAICompatAdapter(
   'groq',
   'https://api.groq.com/openai/v1/chat/completions',
-  'llama-3.3-70b-versatile'
+  'openai/gpt-oss-120b'
 )
 

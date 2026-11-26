@@ -21,7 +21,36 @@ export class AutoScroller {
   private onSmoothness: SmoothnessCallback | null = null
   private frameDeltas: number[] = []
   private elapsedMs = 0
+  private streaming = false
+  private loop = false
+  private hoverPaused = false
   public speed = 60 // px/s
+
+  setStreaming(streaming: boolean): void {
+    this.streaming = streaming
+  }
+
+  setLoop(loop: boolean): void {
+    this.loop = loop
+  }
+
+  /** Temporarily pause/resume scrolling on pointer hover without terminating the scroll session. */
+  setHoverPaused(paused: boolean): void {
+    if (this.hoverPaused === paused) return
+    this.hoverPaused = paused
+    if (paused) {
+      if (this.rafId !== null) {
+        cancelAnimationFrame(this.rafId)
+        this.rafId = null
+      }
+      return
+    }
+    if (this.container && this.rafId === null) {
+      this.pos = this.container.scrollTop
+      this.lastTimestamp = performance.now()
+      this.rafId = requestAnimationFrame(this.tick)
+    }
+  }
 
   start(
     container: HTMLElement,
@@ -46,12 +75,14 @@ export class AutoScroller {
       cancelAnimationFrame(this.rafId)
       this.rafId = null
     }
+    this.hoverPaused = false
+    this.container = null
     this.frameDeltas = []
     this.elapsedMs = 0
   }
 
   isRunning(): boolean {
-    return this.rafId !== null
+    return this.rafId !== null || this.hoverPaused
   }
 
   setSpeed(speed: number): void {
@@ -59,7 +90,7 @@ export class AutoScroller {
   }
 
   private tick = (timestamp: number): void => {
-    if (!this.container) return
+    if (!this.container || this.hoverPaused) return
 
     const deltaMs = timestamp - this.lastTimestamp
     const deltaSec = deltaMs / 1000
@@ -91,8 +122,21 @@ export class AutoScroller {
     this.pos += this.speed * deltaSec
     this.container.scrollTop = this.pos
 
-    const maxScroll = this.container.scrollHeight - this.container.clientHeight
+    const maxScroll = Math.max(0, this.container.scrollHeight - this.container.clientHeight)
     if (this.pos >= maxScroll - 1) {
+      if (this.streaming) {
+        this.pos = maxScroll
+        this.container.scrollTop = this.pos
+        this.rafId = requestAnimationFrame(this.tick)
+        return
+      }
+      if (this.loop && maxScroll > 0) {
+        this.pos = 0
+        this.container.scrollTop = 0
+        this.lastTimestamp = performance.now()
+        this.rafId = requestAnimationFrame(this.tick)
+        return
+      }
       this.stop()
       this.onEnd?.()
       return

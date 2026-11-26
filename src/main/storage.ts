@@ -52,15 +52,58 @@ function isValidBridgeToken(token: unknown): token is string {
   return typeof token === 'string' && /^[0-9a-f]{64}$/i.test(token)
 }
 
+function clampNum(val: unknown, min: number, max: number, fallback: number, round = false): number {
+  const n = typeof val === 'number' ? val : Number(val)
+  if (!Number.isFinite(n)) return fallback
+  const bounded = Math.max(min, Math.min(max, n))
+  return round ? Math.round(bounded) : bounded
+}
+
+function clampHex(val: unknown, fallback: string): string {
+  return typeof val === 'string' && /^#[0-9a-fA-F]{6}$/.test(val) ? val : fallback
+}
+
+const VALID_TEXT_ALIGNS = new Set<Settings['textAlign']>(['left', 'center', 'right', 'justify'])
+const VALID_TOOLBAR_MODES = new Set<Settings['toolbarMode']>(['hover', 'always', 'minimal'])
+const VALID_TRANSITIONS = new Set<Settings['uiTransitionSpeed']>(['none', 'fast', 'normal', 'slow'])
+
 function clampSettings(s: Settings): Settings {
-  s.fontSize = Math.max(8, Math.min(200, Math.round(Number(s.fontSize) || 28)))
-  s.lineHeight = Math.max(1.0, Math.min(3.0, Number(s.lineHeight) || 1.5))
-  s.letterSpacing = Math.max(-2, Math.min(10, Number(s.letterSpacing) || 0))
-  s.padding = Math.max(0, Math.min(64, Math.round(Number(s.padding) ?? 16)))
-  s.opacity = Math.max(0.3, Math.min(1.0, Number(s.opacity) || 1.0))
-  s.autoScrollSpeed = Math.max(10, Math.min(400, Math.round(Number(s.autoScrollSpeed) || 60)))
-  s.bridgePort = Math.max(1024, Math.min(65535, Math.round(Number(s.bridgePort) || 47821)))
+  s.fontSize = clampNum(s.fontSize, 8, 200, 28, true)
+  const rawWeight = clampNum(s.fontWeight, 100, 900, 400, true)
+  s.fontWeight = Math.max(100, Math.min(900, Math.round(rawWeight / 100) * 100))
+  s.lineHeight = clampNum(s.lineHeight, 1.0, 3.0, 1.5)
+  s.letterSpacing = clampNum(s.letterSpacing, -2, 10, 0)
+  s.padding = clampNum(s.padding, 0, 80, 16, true)
+  if (!VALID_TEXT_ALIGNS.has(s.textAlign)) s.textAlign = 'left'
+  s.textColor = clampHex(s.textColor, '#e6e8ec')
+  s.bgColor = clampHex(s.bgColor, '#0f1115')
+  s.opacity = clampNum(s.opacity, 0.3, 1.0, 1.0)
+  s.autoScrollSpeed = clampNum(s.autoScrollSpeed, 10, 400, 60, true)
+  s.bridgePort = clampNum(s.bridgePort, 1024, 65535, 47821, true)
   s.bridgeExtensionId = typeof s.bridgeExtensionId === 'string' ? s.bridgeExtensionId.trim() : ''
+  // New fields with safe defaults
+  s.textShadow = Boolean(s.textShadow)
+  s.textShadowColor = clampHex(s.textShadowColor, '#ffffff')
+  s.textShadowBlur = clampNum(s.textShadowBlur, 0, 32, 8, true)
+  const rawMaxW = clampNum(s.maxContentWidth, 0, 1400, 0, true)
+  s.maxContentWidth = rawMaxW <= 0 ? 0 : Math.max(320, Math.min(1400, rawMaxW))
+  s.mirrorX = Boolean(s.mirrorX)
+  s.mirrorY = Boolean(s.mirrorY)
+  s.readingGuide = Boolean(s.readingGuide)
+  s.uiAccentColor = clampHex(s.uiAccentColor, '#f59e0b')
+  s.uiSurfaceColor = clampHex(s.uiSurfaceColor, '#0d0d0d')
+  s.showChromeBorder = s.showChromeBorder !== false
+  s.showScrollbar = s.showScrollbar !== false
+  if (!VALID_TOOLBAR_MODES.has(s.toolbarMode)) s.toolbarMode = 'hover'
+  if (!VALID_TRANSITIONS.has(s.uiTransitionSpeed)) s.uiTransitionSpeed = 'normal'
+  s.minimizeOnBlur = Boolean(s.minimizeOnBlur)
+  s.cursorHideOnPlay = Boolean(s.cursorHideOnPlay)
+  s.pauseScrollOnHover = Boolean(s.pauseScrollOnHover)
+  s.autoScrollLoop = Boolean(s.autoScrollLoop)
+  s.openLastSessionOnStartup = Boolean(s.openLastSessionOnStartup)
+  s.openInNewTab = s.openInNewTab !== false
+  s.rsvpOrpColor = clampHex(s.rsvpOrpColor, '#ff5252')
+  s.sessionPruneAgeDays = clampNum(s.sessionPruneAgeDays, 0, 90, 7, true)
   if (!isValidBridgeToken(s.bridgeToken)) {
     s.bridgeToken = randomBytes(32).toString('hex')
   }
@@ -70,13 +113,17 @@ function clampSettings(s: Settings): Settings {
   if (!VALID_READING_MODES.has(s.readingMode)) {
     s.readingMode = 'flow'
   }
-  const rawWpm = Math.max(150, Math.min(1000, Number(s.rsvpWpm) || 350))
+  const rawWpm = clampNum(s.rsvpWpm, 150, 1000, 350, true)
   s.rsvpWpm = Math.round(rawWpm / 25) * 25
-  s.bionicStrength = Math.max(0.2, Math.min(0.7, Number(s.bionicStrength) || 0.4))
+  s.bionicStrength = clampNum(s.bionicStrength, 0.2, 0.7, 0.4)
   if (!VALID_AI_PROVIDERS.has(s.aiProvider)) {
     s.aiProvider = 'ollama'
   }
-  s.aiModel = typeof s.aiModel === 'string' && s.aiModel.trim() ? s.aiModel.trim() : 'llama3.2'
+  const rawModel = typeof s.aiModel === 'string' && s.aiModel.trim() ? s.aiModel.trim() : 'llama3.2'
+  // Migrate retired Groq default model so existing installs don't hit 404
+  s.aiModel = s.aiProvider === 'groq' && rawModel === 'llama-3.3-70b-versatile'
+    ? 'openai/gpt-oss-120b'
+    : rawModel
   s.ollamaUrl =
     typeof s.ollamaUrl === 'string' && s.ollamaUrl.trim()
       ? s.ollamaUrl.trim().replace(/\/+$/, '')
@@ -202,26 +249,27 @@ export async function clearSessions(): Promise<void> {
   )
 }
 
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
 const MAX_SESSIONS = 20
 
 export async function pruneSessions(): Promise<void> {
   await ensureSessionsDir()
   const sessionsDir = getSessionsDir()
+  const settings = await loadSettings()
   let sessions = await listSessions()
-  const cutoff = Date.now() - SEVEN_DAYS_MS
 
-  // Delete older than 7 days
-  const toDelete = sessions.filter((s) => s.updatedAt < cutoff)
-  for (const s of toDelete) {
-    try {
-      await fs.unlink(join(sessionsDir, `${s.id}.json`))
-    } catch {
-      /* ignore */
+  if (settings.sessionPruneAgeDays > 0) {
+    const cutoff = Date.now() - settings.sessionPruneAgeDays * DAY_MS
+    const toDelete = sessions.filter((s) => s.updatedAt < cutoff)
+    for (const s of toDelete) {
+      try {
+        await fs.unlink(join(sessionsDir, `${s.id}.json`))
+      } catch {
+        /* ignore */
+      }
     }
+    sessions = sessions.filter((s) => s.updatedAt >= cutoff)
   }
-
-  sessions = sessions.filter((s) => s.updatedAt >= cutoff)
 
   // Keep newest 20
   if (sessions.length > MAX_SESSIONS) {

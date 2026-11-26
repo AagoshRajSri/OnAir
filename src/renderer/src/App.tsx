@@ -13,7 +13,8 @@ import type {
   AIStreamStartPayload,
   AIStreamChunkPayload,
   AIStreamDonePayload,
-  AIStreamErrorPayload
+  AIStreamErrorPayload,
+  ResizeEdge
 } from '../../shared/types'
 import { DEFAULT_SETTINGS } from '../../shared/types'
 import { applySettingsToDOM } from './lib/themes'
@@ -39,6 +40,13 @@ declare global {
       clipboardImport: () => Promise<void>
       shortcutsConflicts: () => Promise<ShortcutId[]>
       windowApply: (payload: WindowApplyPayload) => Promise<void>
+      windowDragStart: () => void
+      windowDragMove: () => void
+      windowDragEnd: () => void
+      windowResizeStart: (edge: ResizeEdge) => void
+      windowResizeMove: () => void
+      windowResizeEnd: () => void
+      windowSetIgnoreMouse: (ignore: boolean) => void
       bridgeStatusGet: () => Promise<BridgeStatus>
       bridgeTokenRegenerate: () => Promise<string>
       secretsSetKey: (provider: AIProviderId, apiKey: string) => Promise<void>
@@ -46,6 +54,7 @@ declare global {
       secretsDeleteKey: (provider: AIProviderId) => Promise<void>
       aiStreamStart: (payload: AIStreamStartPayload) => Promise<void>
       aiStreamAbort: (streamId?: string) => Promise<boolean>
+      aiListModels: (provider: AIProviderId, ollamaUrl?: string) => Promise<string[]>
       metricsEnabled: () => Promise<boolean>
       metricsMark: (payload: MetricsMarkPayload) => void
       onContentIncoming: (cb: (payload: ContentIncomingPayload) => void) => () => void
@@ -56,6 +65,7 @@ declare global {
       onAiStreamChunk: (cb: (payload: AIStreamChunkPayload) => void) => () => void
       onAiStreamDone: (cb: (payload: AIStreamDonePayload) => void) => () => void
       onAiStreamError: (cb: (payload: AIStreamErrorPayload) => void) => () => void
+      onMaximizeChanged: (cb: (maximized: boolean) => void) => () => void
       getPathForFile: (file: File) => string
     }
   }
@@ -95,7 +105,9 @@ export default function App(): ReactElement {
   const [showToolbar, setShowToolbar] = useState(false)
   const [windowHeight, setWindowHeight] = useState(window.innerHeight)
   const [isEditing, setIsEditing] = useState(false)
+  const [streamingSessionIds, setStreamingSessionIds] = useState<string[]>([])
   const [isDraggingOver, setIsDraggingOver] = useState(false)
+  const [isMaximized, setIsMaximized] = useState(false)
   const [commandEvent, setCommandEvent] = useState<{ cmd: ShortcutId; seq: number } | null>(null)
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({
     state: 'stopped',
@@ -115,10 +127,26 @@ export default function App(): ReactElement {
   } | null>(null)
   const tabsRef = useRef<Session[]>([])
   const activeTabIdRef = useRef<string | null>(null)
+  const streamingIdsRef = useRef<string[]>([])
+  const openInNewTabRef = useRef(settings.openInNewTab)
+  const saveWatchedRef = useRef(settings.saveWatchedToHistory)
+  const editTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const cmdSeq = useRef(0)
+  const draggingWinRef = useRef(false)
+  const resizingEdgeRef = useRef<ResizeEdge | null>(null)
+  const ignoreMouseRef = useRef(false)
+
+  const setIgnoreMouse = useCallback((ignore: boolean): void => {
+    if (ignoreMouseRef.current === ignore) return
+    ignoreMouseRef.current = ignore
+    window.api?.windowSetIgnoreMouse(ignore)
+  }, [])
 
   tabsRef.current = tabs
   activeTabIdRef.current = activeTabId
+  streamingIdsRef.current = streamingSessionIds
+  openInNewTabRef.current = settings.openInNewTab
+  saveWatchedRef.current = settings.saveWatchedToHistory
 
   const currentSession = tabs.find((t) => t.id === activeTabId) ?? null
   const text = currentSession?.text ?? ''
@@ -126,7 +154,10 @@ export default function App(): ReactElement {
   const showToast = useCallback((msg: string) => {
     setToast(msg)
     if (toastTimer.current) clearTimeout(toastTimer.current)
-    toastTimer.current = setTimeout(() => setToast(null), 2000)
+    const duration = /error|failed|401|403|404|429|timed out|decommissioned|not found/i.test(msg)
+      ? 4500
+      : 2000
+    toastTimer.current = setTimeout(() => setToast(null), duration)
   }, [])
 
   // Load initial settings, metrics flag, and newest session as first tab
@@ -134,26 +165,38 @@ export default function App(): ReactElement {
     if (!window.api) return
     let cancelled = false
 
-    ;(async () => {
-      const [metricsOn, loadedSettings, list, initialBridgeStatus] = await Promise.all([
-        window.api.metricsEnabled(),
-        window.api.settingsGet(),
-        window.api.sessionsList(),
-        window.api.bridgeStatusGet()
-      ])
-      if (cancelled) return
+      ; (async () => {
+        const [metricsOn, loadedSettings, list, initialBridgeStatus] = await Promise.all([
+          window.api.metricsEnabled(),
+          window.api.settingsGet(),
+          window.api.sessionsList(),
+          window.api.bridgeStatusGet()
+        ])
+        if (cancelled) return
 
-      setScrollMetricsEnabled(metricsOn)
-      setSettings(loadedSettings)
-      setBridgeStatus(initialBridgeStatus)
-      applySettingsToDOM(loadedSettings)
+        setScrollMetricsEnabled(metricsOn)
+        setSettings(loadedSettings)
+        setBridgeStatus(initialBridgeStatus)
+        applySettingsToDOM(loadedSettings)
 
-      if (list.length > 0) {
-        const newest = list[0]
-        setTabs([newest])
-        setActiveTabId(newest.id)
-      }
-    })()
+        if (loadedSettings.openLastSessionOnStartup && list.length > 0) {
+          const newest = list[0]
+          setTabs([newest])
+          setActiveTabId(newest.id)
+        } else {
+          const blank: Session = {
+            id: newUuid(),
+            title: 'New tab',
+            source: 'typed',
+            text: '',
+            sentenceIndex: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          }
+          setTabs([blank])
+          setActiveTabId(blank.id)
+        }
+      })()
 
     return () => {
       cancelled = true
@@ -194,11 +237,15 @@ export default function App(): ReactElement {
         }
 
         if (payload.final === false) {
+          setStreamingSessionIds((prev) =>
+            prev.includes(updatedSession.id) ? prev : [...prev, updatedSession.id]
+          )
           if (bridgeSaveTimer.current) clearTimeout(bridgeSaveTimer.current)
           bridgeSaveTimer.current = setTimeout(() => {
             window.api.sessionSave(updatedSession)
           }, 500)
         } else {
+          setStreamingSessionIds((prev) => prev.filter((id) => id !== updatedSession.id))
           if (bridgeSaveTimer.current) {
             clearTimeout(bridgeSaveTimer.current)
             bridgeSaveTimer.current = null
@@ -219,22 +266,54 @@ export default function App(): ReactElement {
         }
 
         const current = tabsRef.current.find((t) => t.id === currentActiveId)
+
+        // Bridge messages (streaming from the Chrome extension) replace the current
+        // active tab in-place during streaming so one answer stays inside a single tab.
+        // Non-bridge imports replace the current tab only when openInNewTab is disabled
+        // or the active tab is empty.
+        const isBridgeStream = payload.source === 'bridge'
+        const currentIsBridgeAndDone =
+          current &&
+          current.source === 'bridge' &&
+          !streamingIdsRef.current.includes(current.id) &&
+          payload.final !== false
+
+        const shouldReplaceCurrentTab = Boolean(
+          current &&
+          (current.text === '' ||
+            !openInNewTabRef.current ||
+            (isBridgeStream && !currentIsBridgeAndDone))
+        )
+
+        const finalSession =
+          shouldReplaceCurrentTab && current
+            ? { ...newSession, id: current.id }
+            : newSession
+
         const nextTabs =
-          current && current.text === ''
-            ? tabsRef.current.map((t) => (t.id === current.id ? newSession : t))
-            : [...tabsRef.current, newSession]
+          shouldReplaceCurrentTab && current
+            ? tabsRef.current.map((t) => (t.id === current.id ? finalSession : t))
+            : [...tabsRef.current, finalSession]
+
         tabsRef.current = nextTabs
         setTabs(nextTabs)
-        if (currentActiveId) {
+        if (currentActiveId && finalSession.id !== currentActiveId) {
           setPreviousSessionId(currentActiveId)
         }
-        activeTabIdRef.current = newSession.id
-        setActiveTabId(newSession.id)
+        activeTabIdRef.current = finalSession.id
+        setActiveTabId(finalSession.id)
         setIsEditing(false)
 
         // Watcher imports kept in memory only unless saveWatchedToHistory is true
-        if (payload.source !== 'clipboard-watch' || settings.saveWatchedToHistory) {
-          window.api.sessionSave(newSession)
+        if (payload.source !== 'clipboard-watch' || saveWatchedRef.current) {
+          window.api.sessionSave(finalSession)
+        }
+        if (payload.final === false) {
+          setStreamingSessionIds((prev) =>
+            prev.includes(finalSession.id) ? prev : [...prev, finalSession.id]
+          )
+        } else {
+          setStreamingSessionIds((prev) => prev.filter((id) => id !== finalSession.id))
         }
       }
 
@@ -262,7 +341,7 @@ export default function App(): ReactElement {
         })
       })
     },
-    [settings.saveWatchedToHistory]
+    []
   )
 
   const openSessionInTabs = useCallback(
@@ -335,14 +414,10 @@ export default function App(): ReactElement {
   }, [settings.readingMode])
 
   const handleToggleLock = useCallback(() => {
-    const nextLocked = !settings.locked
-    handleSettingsChange({
-      locked: nextLocked,
-      alwaysOnTop: nextLocked
-    })
+    handleSettingsChange({ locked: !settings.locked })
   }, [settings.locked, handleSettingsChange])
 
-  const handleOpenFile = async (): Promise<void> => {
+  const handleOpenFile = useCallback(async (): Promise<void> => {
     const filePath = await window.api.fileOpenDialog()
     if (!filePath) return
     try {
@@ -350,7 +425,7 @@ export default function App(): ReactElement {
     } catch {
       // Toast displayed from main
     }
-  }
+  }, [])
 
   const handleCycleMode = useCallback((): void => {
     const order: ReadingMode[] = ['flow', 'rsvp', 'bionic']
@@ -372,7 +447,8 @@ export default function App(): ReactElement {
       const contextText = currentTab?.text.trim() ? currentTab.text : undefined
       const prePromptSessionId = currentTab && currentTab.text.trim() ? currentTab.id : currentActiveId
 
-      const sessionId = newUuid()
+      const replaceCurrent = Boolean(currentTab && (currentTab.text === '' || !openInNewTabRef.current))
+      const sessionId = replaceCurrent && currentTab ? currentTab.id : newUuid()
       const streamId = newUuid()
       const initialTitle = transform
         ? transform.charAt(0).toUpperCase() + transform.slice(1)
@@ -391,7 +467,7 @@ export default function App(): ReactElement {
       }
 
       const nextTabs =
-        currentTab && currentTab.text === ''
+        replaceCurrent && currentTab
           ? tabsRef.current.map((t) => (t.id === currentTab.id ? newSession : t))
           : [...tabsRef.current, newSession]
       tabsRef.current = nextTabs
@@ -578,6 +654,11 @@ export default function App(): ReactElement {
       }
     })
 
+    const unMaximize = window.api.onMaximizeChanged((max) => {
+      setIsMaximized(max)
+      if (max) setIgnoreMouse(false)
+    })
+
     return () => {
       unContent()
       unCommand()
@@ -587,8 +668,9 @@ export default function App(): ReactElement {
       unAiChunk()
       unAiDone()
       unAiError()
+      unMaximize()
     }
-  }, [handleNewContent, handleCommand, showToast])
+  }, [handleNewContent, handleCommand, showToast, setIgnoreMouse])
 
   // Local keydowns: Esc aborts AI stream, Ctrl+Alt+P/M fallbacks, Ctrl+E (Edit), Ctrl+V (Paste)
   useEffect(() => {
@@ -616,19 +698,33 @@ export default function App(): ReactElement {
           return
         }
       }
-      if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'e' || e.key === 'E')) {
+      const target = e.target as HTMLElement | null
+      const inEditable = Boolean(
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      )
+
+      if (!inEditable && e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'e' || e.key === 'E')) {
         e.preventDefault()
         setIsEditing((v) => !v)
         return
       }
-      if (!isEditing && e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'v' || e.key === 'V')) {
+      if (!isEditing && !inEditable && e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault()
+        void handleOpenFile()
+        return
+      }
+      if (!isEditing && !inEditable && e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'v' || e.key === 'V')) {
         e.preventDefault()
         window.api?.clipboardImport()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isEditing, handleAbortAiPrompt, handleCycleMode, handleBack])
+  }, [isEditing, handleAbortAiPrompt, handleCycleMode, handleBack, handleOpenFile])
 
   const handleEditSave = useCallback(
     async (newText: string): Promise<void> => {
@@ -757,6 +853,28 @@ export default function App(): ReactElement {
     setIsDraggingOver(false)
   }, [])
 
+  const finishHandleDrag = useCallback((): void => {
+    if (!draggingWinRef.current) return
+    draggingWinRef.current = false
+    window.api?.windowDragEnd()
+  }, [])
+
+  const finishWindowResize = useCallback((): void => {
+    if (!resizingEdgeRef.current) return
+    resizingEdgeRef.current = null
+    window.api?.windowResizeEnd()
+  }, [])
+
+  useEffect(() => {
+    const handleWindowBlur = (): void => {
+      finishHandleDrag()
+      finishWindowResize()
+      setIsDraggingOver(false)
+    }
+    window.addEventListener('blur', handleWindowBlur)
+    return () => window.removeEventListener('blur', handleWindowBlur)
+  }, [finishHandleDrag, finishWindowResize])
+
   if (!window.api) {
     return (
       <div
@@ -778,172 +896,269 @@ export default function App(): ReactElement {
     )
   }
 
+  const shouldShowToolbar =
+    windowHeight >= 100 &&
+    !isEditing &&
+    (settings.toolbarMode === 'always' || (settings.toolbarMode === 'hover' && showToolbar))
+
   return (
     <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        background: 'var(--bg-color)',
-        outline: isDraggingOver ? '2px dashed #4fc3f7' : 'none'
-      }}
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onMouseEnter={() => setShowToolbar(true)}
-      onMouseLeave={() => setShowToolbar(false)}
-    >
-      {/* 12px drag strip across top with CSS -webkit-app-region: drag */}
-      <div
-        className="drag-strip"
-        style={
-          {
-            WebkitAppRegion: settings.locked ? 'no-drag' : 'drag'
-          } as React.CSSProperties
+      className={`app-viewport${isMaximized ? ' maximized' : ''}`}
+      onMouseMove={(e) => {
+        if (draggingWinRef.current || resizingEdgeRef.current || isMaximized) {
+          setIgnoreMouse(false)
+          return
         }
+        setIgnoreMouse(e.target === e.currentTarget)
+      }}
+      onMouseLeave={() => {
+        setIgnoreMouse(false)
+      }}
+      onDragEnter={() => {
+        setIgnoreMouse(false)
+      }}
+    >
+      <div
+        className={`app-shell${isDraggingOver ? ' drag-active' : ''}`}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onMouseEnter={() => setShowToolbar(true)}
+        onMouseLeave={() => setShowToolbar(false)}
       >
-        {settings.clipboardWatch && <div className="watch-dot" />}
-      </div>
-
-      {/* Dedicated top-right corner drag grip (inset from resize edges) */}
-      {!settings.locked && (
-        <div
-          className="corner-drag-handle"
-          title="Drag to move window"
-          aria-label="Drag to move window"
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-            <circle cx="3.5" cy="3" r="1.1" />
-            <circle cx="8.5" cy="3" r="1.1" />
-            <circle cx="3.5" cy="6" r="1.1" />
-            <circle cx="8.5" cy="6" r="1.1" />
-            <circle cx="3.5" cy="9" r="1.1" />
-            <circle cx="8.5" cy="9" r="1.1" />
-          </svg>
+        {!isMaximized &&
+          (['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'] as const).map((edge) => (
+            <div
+              key={edge}
+              className={`resize-edge resize-${edge}`}
+              onPointerDown={(e) => {
+                if (e.button !== 0) return
+                e.preventDefault()
+                e.stopPropagation()
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                } catch {
+                  /* ignore */
+                }
+                resizingEdgeRef.current = edge
+                setIgnoreMouse(false)
+                window.api.windowResizeStart(edge)
+              }}
+              onPointerMove={() => {
+                if (resizingEdgeRef.current) {
+                  window.api.windowResizeMove()
+                }
+              }}
+              onPointerUp={finishWindowResize}
+              onPointerCancel={finishWindowResize}
+              onLostPointerCapture={finishWindowResize}
+            />
+          ))}
+        {/* 10px drag strip across top with CSS -webkit-app-region: drag */}
+        <div className="drag-strip">
+          {settings.clipboardWatch && <div className="watch-dot" />}
         </div>
-      )}
 
-      {/* 28px toolbar row below drag strip, visible on hover when height >= 100 */}
-      {showToolbar && windowHeight >= 100 && !isEditing && (
-        <Toolbar
-          locked={settings.locked}
-          readingMode={settings.readingMode}
-          onCycleMode={handleCycleMode}
-          onTogglePrompt={() => setShowPromptBar((v) => !v)}
-          onOpenFile={handleOpenFile}
-          onImportClipboard={() => window.api.clipboardImport()}
-          onEdit={() => setIsEditing(true)}
-          onToggleLock={handleToggleLock}
-          onSettings={() => setShowSettings((v) => !v)}
-          onHide={() => window.api.windowApply({ hidden: true })}
-        />
-      )}
+        {/* Toolbar row below drag strip, driven by settings.toolbarMode */}
+        {shouldShowToolbar && (
+          <Toolbar
+            locked={settings.locked}
+            readingMode={settings.readingMode}
+            onCycleMode={handleCycleMode}
+            onTogglePrompt={() => setShowPromptBar((v) => !v)}
+            onOpenFile={handleOpenFile}
+            onImportClipboard={() => window.api.clipboardImport()}
+            onEdit={() => setIsEditing(true)}
+            onToggleLock={handleToggleLock}
+            onSettings={() => setShowSettings((v) => !v)}
+            onHide={() => window.api.windowApply({ hidden: true })}
+            onMinimize={() => window.api.windowApply({ minimize: true })}
+            onToggleMaximize={() => window.api.windowApply({ toggleMaximize: true })}
+            onClose={() => window.api.windowApply({ close: true })}
+          />
+        )}
 
-      {showPromptBar && !isEditing && (
-        <PromptBar
-          hasContextText={text.trim().length > 0}
-          isStreaming={isAiStreaming}
-          provider={settings.aiProvider}
-          model={settings.aiModel}
-          onSubmitPrompt={handleStartAiPrompt}
-          onAbort={handleAbortAiPrompt}
-          onClose={() => setShowPromptBar(false)}
-        />
-      )}
+        {showPromptBar && !isEditing && (
+          <PromptBar
+            hasContextText={text.trim().length > 0}
+            isStreaming={isAiStreaming}
+            provider={settings.aiProvider}
+            model={settings.aiModel}
+            onSubmitPrompt={handleStartAiPrompt}
+            onAbort={handleAbortAiPrompt}
+            onClose={() => setShowPromptBar(false)}
+          />
+        )}
 
-      {/* Tab strip for switching between multiple pasted/imported texts in one window */}
-      {tabs.length > 0 && windowHeight >= 100 && !isEditing && (
-        <div className="tab-bar">
-          {tabs.map((tab) => {
-            const isActive = tab.id === activeTabId
-            return (
-              <div
-                key={tab.id}
-                className={`tab-item${isActive ? ' active' : ''}`}
-                onClick={() => {
-                  if (tab.id !== activeTabId) {
-                    if (activeTabId) setPreviousSessionId(activeTabId)
-                    setActiveTabId(tab.id)
-                  }
-                }}
-                title={tab.title || 'Untitled'}
-              >
-                <span className="tab-title">{tab.title || 'Untitled'}</span>
+        {/* Tab strip for switching between multiple pasted/imported texts in one window */}
+        {tabs.length > 0 && windowHeight >= 100 && !isEditing && (
+          <div className="tab-bar">
+            {tabs.map((tab) => {
+              const isActive = tab.id === activeTabId
+              const isTabStreaming = streamingSessionIds.includes(tab.id)
+              return (
+                <div
+                  key={tab.id}
+                  className={`tab-item${isActive ? ' active' : ''}${isTabStreaming ? ' streaming' : ''}`}
+                  onClick={() => {
+                    if (tab.id !== activeTabId) {
+                      if (activeTabId) setPreviousSessionId(activeTabId)
+                      setActiveTabId(tab.id)
+                    }
+                  }}
+                  title={tab.title || 'Untitled'}
+                >
+                  <span className="tab-title">{tab.title || 'Untitled'}</span>
+                  <button
+                    type="button"
+                    className="tab-close"
+                    aria-label="Close tab"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleCloseTab(tab.id)
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              )
+            })}
+            <button
+              type="button"
+              className="tab-add"
+              title="New tab"
+              aria-label="New tab"
+              onClick={handleNewBlankTab}
+            >
+              +
+            </button>
+          </div>
+        )}
+
+        {/* Reader or edit textarea */}
+        {isEditing ? (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div className="edit-bar">
+              <span>Editing script</span>
+              <div className="edit-bar-actions">
                 <button
                   type="button"
-                  className="tab-close"
-                  aria-label="Close tab"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleCloseTab(tab.id)
-                  }}
+                  className="sp-btn"
+                  onClick={() => setIsEditing(false)}
+                  title="Cancel (Esc)"
                 >
-                  ×
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="sp-btn accent"
+                  onClick={() => handleEditSave(editTextareaRef.current?.value ?? text)}
+                  title="Save changes (Ctrl+Enter)"
+                >
+                  Save  Ctrl+Enter
                 </button>
               </div>
-            )
-          })}
-          <button
-            type="button"
-            className="tab-add"
-            title="New tab"
-            aria-label="New tab"
-            onClick={handleNewBlankTab}
+            </div>
+            <textarea
+              ref={editTextareaRef}
+              className="edit-textarea"
+              defaultValue={text}
+              autoFocus
+              style={{ flex: 1, minHeight: 0 }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.ctrlKey) {
+                  handleEditSave((e.target as HTMLTextAreaElement).value)
+                }
+                if (e.key === 'Escape') {
+                  setIsEditing(false)
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <Reader
+            text={text}
+            settings={settings}
+            currentSession={currentSession}
+            isStreaming={
+              Boolean(currentSession && streamingSessionIds.includes(currentSession.id)) ||
+              (isAiStreaming && activeAiStreamRef.current?.sessionId === currentSession?.id)
+            }
+            commandEvent={commandEvent}
+            onSentenceChange={handleSentenceChange}
+            onSettingsChange={handleSettingsChange}
+          />
+        )}
+
+        {/* Settings panel */}
+        {showSettings && (
+          <SettingsPanel
+            settings={settings}
+            bridgeStatus={bridgeStatus}
+            onChange={handleSettingsChange}
+            onClose={() => setShowSettings(false)}
+            showToast={showToast}
+            onSelectSession={async (id) => {
+              const s = await window.api.sessionLoad(id)
+              if (s) openSessionInTabs(s)
+            }}
+            onDeleteSession={(id) => handleCloseTab(id)}
+            onClearSessions={() => {
+              setTabs([])
+              setActiveTabId(null)
+              setPreviousSessionId(null)
+            }}
+          />
+        )}
+
+        {/* Toast notification */}
+        {toast && <div className="toast">{toast}</div>}
+      </div>
+
+      {/* Exterior circular drag handle positioned in the bottom-left exterior angle */}
+      {!isMaximized && (
+        <button
+          type="button"
+          className="ext-drag-btn"
+          aria-label="Drag to move window"
+          onPointerDown={(e) => {
+            if (e.button !== 0) return
+            e.preventDefault()
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId)
+            } catch {
+              /* ignore */
+            }
+            draggingWinRef.current = true
+            setIgnoreMouse(false)
+            window.api.windowDragStart()
+          }}
+          onPointerMove={() => {
+            if (draggingWinRef.current) {
+              window.api.windowDragMove()
+            }
+          }}
+          onPointerUp={finishHandleDrag}
+          onPointerCancel={finishHandleDrag}
+          onLostPointerCapture={finishHandleDrag}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            +
-          </button>
-        </div>
+            <polyline points="6,2 2,2 2,6" />
+            <polyline points="8,12 12,12 12,8" />
+            <line x1="2" y1="2" x2="12" y2="12" />
+          </svg>
+        </button>
       )}
-
-      {/* Reader or edit textarea */}
-      {isEditing ? (
-        <textarea
-          className="edit-textarea"
-          defaultValue={text}
-          autoFocus
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && e.ctrlKey) {
-              handleEditSave((e.target as HTMLTextAreaElement).value)
-            }
-            if (e.key === 'Escape') {
-              setIsEditing(false)
-            }
-          }}
-        />
-      ) : (
-        <Reader
-          text={text}
-          settings={settings}
-          currentSession={currentSession}
-          commandEvent={commandEvent}
-          onSentenceChange={handleSentenceChange}
-          onSettingsChange={handleSettingsChange}
-        />
-      )}
-
-      {/* Settings panel */}
-      {showSettings && (
-        <SettingsPanel
-          settings={settings}
-          bridgeStatus={bridgeStatus}
-          onChange={handleSettingsChange}
-          onClose={() => setShowSettings(false)}
-          showToast={showToast}
-          onSelectSession={async (id) => {
-            const s = await window.api.sessionLoad(id)
-            if (s) openSessionInTabs(s)
-          }}
-          onDeleteSession={(id) => handleCloseTab(id)}
-          onClearSessions={() => {
-            setTabs([])
-            setActiveTabId(null)
-            setPreviousSessionId(null)
-          }}
-        />
-      )}
-
-      {/* 2-second Toast */}
-      {toast && <div className="toast">{toast}</div>}
     </div>
   )
 }

@@ -3,7 +3,7 @@ import { getSecretKey } from '../secrets'
 import { metrics } from '../metrics'
 import { anthropicAdapter } from './providers/anthropic'
 import { geminiAdapter } from './providers/gemini'
-import { ollamaAdapter } from './providers/ollama'
+import { ollamaAdapter, validateOllamaUrl } from './providers/ollama'
 import { groqAdapter, openaiAdapter } from './providers/openai-compat'
 import type { AIProviderAdapter, PromptRequest, StreamCallbacks, StreamFormat } from './types'
 
@@ -49,7 +49,9 @@ export function formatHttpError(
     return `Access denied (403) for ${provider} — check your API key permissions.`
   }
   if (status === 404) {
-    return `Model or endpoint not found (404) for ${provider} (${model}).`
+    return detail
+      ? `Model or endpoint not found (404) for ${provider} (${model}): ${detail}`
+      : `Model or endpoint not found (404) for ${provider} (${model}).`
   }
   if (status === 429) {
     return `Rate limit exceeded (429) for ${provider} — wait a moment and try again.`
@@ -401,6 +403,92 @@ export async function runAiStream(
 
     callbacks.onToast?.(msg)
     callbacks.onError({ streamId: req.streamId, error: msg })
+  }
+}
+
+export async function listProviderModels(
+  provider: AIProviderId,
+  ollamaUrl?: string,
+  deps: Pick<StreamDependencies, 'fetchImpl' | 'getApiKey'> = {}
+): Promise<string[]> {
+  const fetchImpl = deps.fetchImpl ?? fetch
+  const getApiKey = deps.getApiKey ?? getSecretKey
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), CONNECTION_TIMEOUT_MS)
+
+  try {
+    if (provider === 'ollama') {
+      const base = validateOllamaUrl(ollamaUrl)
+      const res = await fetchImpl(`${base}/api/tags`, { signal: controller.signal })
+      if (!res.ok) throw new Error(formatHttpError(res.status, provider, 'tags', await res.text().catch(() => '')))
+      const json = (await res.json()) as { models?: Array<{ name?: string }> }
+      return (json.models ?? []).map((m) => m.name ?? '').filter(Boolean).sort()
+    }
+
+    const apiKey = await getApiKey(provider)
+    if (!apiKey) {
+      throw new Error(`Missing API key for ${provider}. Add one in Settings.`)
+    }
+
+    if (provider === 'groq') {
+      const res = await fetchImpl('https://api.groq.com/openai/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: controller.signal
+      })
+      if (!res.ok) throw new Error(formatHttpError(res.status, provider, 'models', await res.text().catch(() => '')))
+      const json = (await res.json()) as { data?: Array<{ id?: string; active?: boolean }> }
+      return (json.data ?? [])
+        .filter((m) => m.active !== false)
+        .map((m) => m.id ?? '')
+        .filter((id) => id && !/whisper|guard|tts|playai|orpheus|safeguard/i.test(id))
+        .sort()
+    }
+
+    if (provider === 'openai') {
+      const res = await fetchImpl('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: controller.signal
+      })
+      if (!res.ok) throw new Error(formatHttpError(res.status, provider, 'models', await res.text().catch(() => '')))
+      const json = (await res.json()) as { data?: Array<{ id?: string }> }
+      return (json.data ?? [])
+        .map((m) => m.id ?? '')
+        .filter((id) => /^(gpt-|o[1-9]|chatgpt-)/i.test(id) && !/audio|realtime|transcribe|tts|image/i.test(id))
+        .sort()
+    }
+
+    if (provider === 'anthropic') {
+      const res = await fetchImpl('https://api.anthropic.com/v1/models', {
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        signal: controller.signal
+      })
+      if (!res.ok) throw new Error(formatHttpError(res.status, provider, 'models', await res.text().catch(() => '')))
+      const json = (await res.json()) as { data?: Array<{ id?: string }> }
+      return (json.data ?? []).map((m) => m.id ?? '').filter(Boolean).sort()
+    }
+
+    if (provider === 'gemini') {
+      const res = await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models', {
+        headers: { 'x-goog-api-key': apiKey },
+        signal: controller.signal
+      })
+      if (!res.ok) throw new Error(formatHttpError(res.status, provider, 'models', await res.text().catch(() => '')))
+      const json = (await res.json()) as {
+        models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>
+      }
+      return (json.models ?? [])
+        .filter((m) => !m.supportedGenerationMethods || m.supportedGenerationMethods.includes('generateContent'))
+        .map((m) => (m.name ?? '').replace(/^models\//, ''))
+        .filter(Boolean)
+        .sort()
+    }
+
+    return []
+  } finally {
+    clearTimeout(timer)
   }
 }
 

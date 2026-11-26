@@ -71,6 +71,55 @@ describe('Provider DOM Adapters (Step 1 Fixtures)', () => {
       expect(reply?.id).toBe('chatgpt-_r_01_')
       expect(reply?.text).toBe('Second newest reply.')
     })
+
+    it('keeps multi-block voice/search answers after a user turn under one stable tab ID', () => {
+      const dom = new JSDOM(
+        `<!doctype html><html><body><main>
+          <div data-message-author-role="user">What is happening in India currently</div>
+          <div data-content-search-unit-key="u1:assistant">
+            <h4 data-conversation-role="assistant">ChatGPT said:</h4>
+            <div data-response-body="r1">
+              <div data-selected-text-overlay-target="_r_01_" data-markdown-text-style="assistant-message">
+                <p>Checking that out now, just a sec.</p>
+              </div>
+            </div>
+          </div>
+        </main></body></html>`,
+        { url: 'https://chatgpt.com/c/abc123' }
+      )
+      const doc = dom.window.document
+      const firstReply = getChatgptLatestReply(doc)
+      expect(firstReply).not.toBeNull()
+      expect(firstReply?.text).toBe('Checking that out now, just a sec.')
+
+      // ChatGPT appends a second & third block inside the same answer turn
+      const main = doc.querySelector('main')!
+      const secondBlock = doc.createElement('div')
+      secondBlock.setAttribute('data-content-search-unit-key', 'u2:assistant')
+      secondBlock.innerHTML = `<div data-selected-text-overlay-target="_r_02_" data-markdown-text-style="assistant-message" data-markdown-animated=""><p>There is a lot happening in India today.</p></div>`
+      main.appendChild(secondBlock)
+
+      const combinedReply = getChatgptLatestReply(doc)
+      expect(combinedReply?.id).toBe(firstReply?.id)
+      expect(combinedReply?.isStreaming).toBe(true)
+      expect(combinedReply?.text).toBe(
+        'Checking that out now, just a sec.\n\nThere is a lot happening in India today.'
+      )
+
+      // Next user question opens a distinct turn ID cleanly
+      const nextUser = doc.createElement('div')
+      nextUser.setAttribute('data-message-author-role', 'user')
+      nextUser.textContent = 'Follow up question'
+      main.appendChild(nextUser)
+      expect(getChatgptLatestReply(doc)).toBeNull()
+
+      const nextAssistant = doc.createElement('div')
+      nextAssistant.innerHTML = `<div data-selected-text-overlay-target="_r_03_" data-markdown-text-style="assistant-message"><p>New answer.</p></div>`
+      main.appendChild(nextAssistant)
+      const nextReply = getChatgptLatestReply(doc)
+      expect(nextReply?.id).not.toBe(firstReply?.id)
+      expect(nextReply?.text).toBe('New answer.')
+    })
   })
 
   describe('Claude adapter', () => {

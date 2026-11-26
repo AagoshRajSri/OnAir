@@ -3,6 +3,8 @@ import { tmpdir } from 'os'
 import {
   abortAiStream,
   createStreamLineParser,
+  formatHttpError,
+  listProviderModels,
   runAiStream
 } from '../src/main/ai/client'
 import { validateOllamaUrl } from '../src/main/ai/providers/ollama'
@@ -329,6 +331,34 @@ describe('Main-Process Streaming AI Pipeline & SSE/NDJSON Parser (M10)', () => {
     expect(doneEvents).toHaveLength(1)
     expect(doneEvents[0].aborted).toBe(true)
     expect(doneEvents[0].text).toBe('Partial')
+  })
+
+  it('includes API detail message on 404 errors and lists filtered Groq models', async () => {
+    const errMsg = formatHttpError(
+      404,
+      'groq',
+      'llama-3.3-70b-versatile',
+      JSON.stringify({ error: { message: 'Model decommissioned' } })
+    )
+    expect(errMsg).toContain('404')
+    expect(errMsg).toContain('Model decommissioned')
+
+    const models = await listProviderModels('groq', undefined, {
+      getApiKey: async () => 'gsk-test',
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              { id: 'openai/gpt-oss-120b', active: true },
+              { id: 'whisper-large-v3', active: true },
+              { id: 'inactive-model', active: false },
+              { id: 'llama-3.1-8b-instant', active: true }
+            ]
+          }),
+          { status: 200 }
+        )
+    })
+    expect(models).toEqual(['llama-3.1-8b-instant', 'openai/gpt-oss-120b'])
   })
 })
 

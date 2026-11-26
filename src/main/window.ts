@@ -4,12 +4,20 @@ import { loadSettings, saveSettings } from './storage'
 import { openFileDialog, importFile } from './files'
 import { importFromClipboard } from './clipboard'
 import { metrics } from './metrics'
-import type { Settings, WindowApplyPayload, ContentIncomingPayload } from '../shared/types'
+import type { Settings, WindowApplyPayload, ContentIncomingPayload, ResizeEdge } from '../shared/types'
 import { IPC } from '../shared/types'
+
+const MIN_WIN_WIDTH = 180
+const MIN_WIN_HEIGHT = 110
 
 let boundsTimer: ReturnType<typeof setTimeout> | null = null
 let mainWin: BrowserWindow | null = null
+let dragState: { cursor: Electron.Point; mainBounds: Rectangle; lastX: number; lastY: number } | null = null
+let resizeState: { edge: ResizeEdge; cursor: Electron.Point; bounds: Rectangle; lastBounds: Rectangle } | null = null
 let suppressAutoHideCount = 0
+let windowLocked = false
+let manualMinimizeAllowed = false
+let ignoreMouseState = false
 
 export function setSuppressAutoHide(suppress: boolean): void {
   suppressAutoHideCount = suppress
@@ -27,12 +35,18 @@ function getValidBounds(saved: Settings['bounds']): Rectangle {
   const MIN_H_OVERLAP = 40
 
   if (saved) {
+    const normalized: Rectangle = {
+      x: saved.x,
+      y: saved.y,
+      width: Math.max(MIN_WIN_WIDTH, saved.width),
+      height: Math.max(MIN_WIN_HEIGHT, saved.height)
+    }
     for (const d of displays) {
       const wa = d.workArea
-      const overlapX = Math.min(saved.x + saved.width, wa.x + wa.width) - Math.max(saved.x, wa.x)
-      const overlapY = Math.min(saved.y + saved.height, wa.y + wa.height) - Math.max(saved.y, wa.y)
+      const overlapX = Math.min(normalized.x + normalized.width, wa.x + wa.width) - Math.max(normalized.x, wa.x)
+      const overlapY = Math.min(normalized.y + normalized.height, wa.y + wa.height) - Math.max(normalized.y, wa.y)
       if (overlapX >= MIN_W_OVERLAP && overlapY >= MIN_H_OVERLAP) {
-        return saved
+        return normalized
       }
     }
   }
@@ -40,10 +54,10 @@ function getValidBounds(saved: Settings['bounds']): Rectangle {
   const primary = screen.getPrimaryDisplay()
   const wa = primary.workArea
   return {
-    x: Math.round(wa.x + (wa.width - 480) / 2),
-    y: Math.round(wa.y + (wa.height - 320) / 2),
-    width: 480,
-    height: 320
+    x: Math.round(wa.x + (wa.width - 520) / 2),
+    y: Math.round(wa.y + (wa.height - 360) / 2),
+    width: 520,
+    height: 360
   }
 }
 
@@ -59,6 +73,125 @@ function getAppIcon(): Electron.NativeImage | undefined {
   return undefined
 }
 
+function persistCurrentBounds(): void {
+  if (!mainWin || mainWin.isDestroyed()) return
+  const currentBounds = mainWin.getNormalBounds()
+  void loadSettings()
+    .then((s) => {
+      s.bounds = currentBounds
+      return saveSettings(s)
+    })
+    .catch(() => { })
+}
+
+export function startHandleDrag(): void {
+  if (!mainWin || mainWin.isDestroyed() || mainWin.isMaximized()) return
+  const bounds = mainWin.getBounds()
+  dragState = {
+    cursor: screen.getCursorScreenPoint(),
+    mainBounds: bounds,
+    lastX: bounds.x,
+    lastY: bounds.y
+  }
+}
+
+export function moveHandleDrag(): void {
+  if (!dragState || !mainWin || mainWin.isDestroyed()) return
+  const cur = screen.getCursorScreenPoint()
+  const nx = dragState.mainBounds.x + (cur.x - dragState.cursor.x)
+  const ny = dragState.mainBounds.y + (cur.y - dragState.cursor.y)
+  if (nx === dragState.lastX && ny === dragState.lastY) return
+  dragState.lastX = nx
+  dragState.lastY = ny
+  // Pass fixed initial width/height via setBounds: Electron's setPosition() accumulates size drift per call at fractional DPI (e.g. 125%)
+  mainWin.setBounds({
+    x: nx,
+    y: ny,
+    width: dragState.mainBounds.width,
+    height: dragState.mainBounds.height
+  })
+}
+
+export function endHandleDrag(): void {
+  if (!dragState) return
+  const saved = dragState
+  dragState = null
+  if (mainWin && !mainWin.isDestroyed()) {
+    const cur = mainWin.getBounds()
+    if (cur.width !== saved.mainBounds.width || cur.height !== saved.mainBounds.height) {
+      mainWin.setBounds({
+        x: cur.x,
+        y: cur.y,
+        width: saved.mainBounds.width,
+        height: saved.mainBounds.height
+      })
+    }
+  }
+  persistCurrentBounds()
+}
+
+export function startWindowResize(edge: ResizeEdge): void {
+  if (!mainWin || mainWin.isDestroyed() || mainWin.isMaximized()) return
+  const bounds = mainWin.getBounds()
+  resizeState = {
+    edge,
+    cursor: screen.getCursorScreenPoint(),
+    bounds,
+    lastBounds: { ...bounds }
+  }
+}
+
+export function moveWindowResize(): void {
+  if (!resizeState || !mainWin || mainWin.isDestroyed()) return
+  const cur = screen.getCursorScreenPoint()
+  const dx = cur.x - resizeState.cursor.x
+  const dy = cur.y - resizeState.cursor.y
+  const orig = resizeState.bounds
+
+  let { x, y, width, height } = orig
+
+  if (resizeState.edge.includes('e')) {
+    width = Math.max(MIN_WIN_WIDTH, orig.width + dx)
+  }
+  if (resizeState.edge.includes('s')) {
+    height = Math.max(MIN_WIN_HEIGHT, orig.height + dy)
+  }
+  if (resizeState.edge.includes('w')) {
+    const maxDx = orig.width - MIN_WIN_WIDTH
+    const clampedDx = Math.min(dx, maxDx)
+    x = orig.x + clampedDx
+    width = orig.width - clampedDx
+  }
+  if (resizeState.edge.includes('n')) {
+    const maxDy = orig.height - MIN_WIN_HEIGHT
+    const clampedDy = Math.min(dy, maxDy)
+    y = orig.y + clampedDy
+    height = orig.height - clampedDy
+  }
+
+  const prev = resizeState.lastBounds
+  if (x === prev.x && y === prev.y && width === prev.width && height === prev.height) return
+  resizeState.lastBounds = { x, y, width, height }
+  mainWin.setBounds({ x, y, width, height })
+}
+
+export function endWindowResize(): void {
+  if (!resizeState) return
+  resizeState = null
+  persistCurrentBounds()
+}
+
+export function setWindowIgnoreMouse(ignore: boolean): void {
+  if (!mainWin || mainWin.isDestroyed()) return
+  if (ignore === ignoreMouseState) return
+  ignoreMouseState = ignore
+  if (ignore) {
+    mainWin.setIgnoreMouseEvents(true, { forward: true })
+  } else {
+    mainWin.setIgnoreMouseEvents(false)
+  }
+}
+
 export async function createReaderWindow(): Promise<BrowserWindow> {
   const settings = await loadSettings()
   const bounds = getValidBounds(settings.bounds)
@@ -68,16 +201,22 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
     y: bounds.y,
     width: bounds.width,
     height: bounds.height,
-    minWidth: 120,
-    minHeight: 40,
+    minWidth: MIN_WIN_WIDTH,
+    minHeight: MIN_WIN_HEIGHT,
     icon: getAppIcon(),
     frame: false,
-    transparent: false,
-    resizable: !settings.locked,
-    movable: !settings.locked,
-    alwaysOnTop: settings.locked,
+    transparent: true,
+    hasShadow: false,
+    thickFrame: false,
+    roundedCorners: false,
+    backgroundMaterial: 'none',
+    autoHideMenuBar: true,
+    resizable: true,
+    movable: true,
+    minimizable: !settings.locked,
+    alwaysOnTop: settings.locked || settings.alwaysOnTop,
     show: false,
-    backgroundColor: '#0f1115',
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -86,61 +225,112 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
     }
   })
 
+  win.removeMenu()
   mainWin = win
+  windowLocked = settings.locked
+  ignoreMouseState = false
 
-  if (settings.locked) {
+  if (settings.locked || settings.alwaysOnTop) {
     win.setAlwaysOnTop(true, 'screen-saver')
   } else {
     win.setAlwaysOnTop(false)
   }
 
-  win.setOpacity(settings.opacity)
-
   win.webContents.on('will-navigate', (e) => e.preventDefault())
+
+  win.webContents.on('did-finish-load', () => {
+    if (!win.isDestroyed()) {
+      win.webContents.send(IPC.windowMaximizeChanged, win.isMaximized())
+    }
+  })
 
   win.once('ready-to-show', () => {
     win.show()
   })
 
-  win.on('show', () => {
+  win.on('show', async () => {
     metrics.end('show-window')
-  })
-
-  // When locked, stay pinned on top when focus moves elsewhere; when unlocked, hide/minimize on blur
-  win.on('blur', async () => {
+    setWindowIgnoreMouse(false)
     try {
       if (win.isDestroyed()) return
       const s = await loadSettings()
-      if (s.locked) {
-        if (win.isVisible()) {
-          win.setAlwaysOnTop(true, 'screen-saver')
-        }
-        return
-      }
-      if (suppressAutoHideCount === 0 && !win.webContents.isDevToolsOpened() && win.isVisible()) {
-        win.minimize()
+      win.setMinimizable(!s.locked)
+      if (s.locked || s.alwaysOnTop) {
+        win.setAlwaysOnTop(true, 'screen-saver')
       }
     } catch {
       /* ignore */
     }
   })
 
+  win.on('maximize', () => {
+    if (!win.isDestroyed()) {
+      setWindowIgnoreMouse(false)
+      win.webContents.send(IPC.windowMaximizeChanged, true)
+    }
+  })
+
+  win.on('unmaximize', () => {
+    if (!win.isDestroyed()) {
+      win.webContents.send(IPC.windowMaximizeChanged, false)
+    }
+  })
+
+  win.on('restore', () => {
+    if (!win.isDestroyed()) {
+      win.setMinimizable(!windowLocked)
+      setWindowIgnoreMouse(false)
+    }
+  })
+
+  // Stay pinned on top when locked/alwaysOnTop; avoid redundant SetWindowPos calls on blur
+  win.on('blur', async () => {
+    dragState = null
+    resizeState = null
+    try {
+      if (win.isDestroyed()) return
+      const s = await loadSettings()
+      if (s.locked || s.alwaysOnTop) {
+          if (win.isVisible() && !win.isAlwaysOnTop()) {
+            win.setAlwaysOnTop(true, 'screen-saver')
+          }
+          return
+        }
+        if (s.minimizeOnBlur && suppressAutoHideCount === 0 && !win.webContents.isDevToolsOpened() && win.isVisible()) {
+          win.minimize()
+        }
+      } catch {
+        /* ignore */
+      }
+    })
+
+  win.on('minimize', () => {
+    if (manualMinimizeAllowed) {
+      manualMinimizeAllowed = false
+      return
+    }
+    if (!windowLocked) return
+    setTimeout(() => {
+      if (win.isDestroyed() || !windowLocked) return
+      if (win.isMinimized()) {
+        win.restore()
+      }
+      win.setAlwaysOnTop(true, 'screen-saver')
+    }, 50)
+  })
+
   win.on('closed', () => {
+    dragState = null
+    resizeState = null
+    ignoreMouseState = false
     if (mainWin === win) mainWin = null
   })
 
   const handleBoundsChange = (): void => {
+    if (dragState || resizeState) return
     if (boundsTimer) clearTimeout(boundsTimer)
-    boundsTimer = setTimeout(async () => {
-      try {
-        if (win.isDestroyed()) return
-        const currentBounds = win.getNormalBounds()
-        const s = await loadSettings()
-        s.bounds = currentBounds
-        await saveSettings(s)
-      } catch {
-        /* window may be destroyed */
-      }
+    boundsTimer = setTimeout(() => {
+      persistCurrentBounds()
     }, 300)
   }
 
@@ -148,9 +338,24 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
   win.on('move', handleBoundsChange)
 
   // Native right-click context menu
-  win.webContents.on('context-menu', async () => {
+  win.webContents.on('context-menu', async (_e, params) => {
     const s = await loadSettings()
+    if (win.isDestroyed()) return
+    const editItems: Electron.MenuItemConstructorOptions[] = []
+    if (params.isEditable) {
+      editItems.push(
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+        { type: 'separator' }
+      )
+    } else if (params.selectionText.trim().length > 0) {
+      editItems.push({ role: 'copy' }, { type: 'separator' })
+    }
+
     const menu = Menu.buildFromTemplate([
+      ...editItems,
       {
         label: 'Settings',
         click: () => win.webContents.send(IPC.command, 'openSettings')
@@ -160,13 +365,13 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
         click: async () => {
           const filePath = await openFileDialog(win)
           if (filePath) {
-            await importFile(filePath, win).catch(() => {})
+            await importFile(filePath, win).catch(() => { })
           }
         }
       },
       {
         label: 'Import clipboard',
-        click: () => importFromClipboard(win)
+        click: () => void importFromClipboard(win)
       },
       {
         label: 'Page-by-page view',
@@ -180,7 +385,7 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
       },
       { type: 'separator' },
       {
-        label: s.locked ? 'Unlock position' : 'Lock position',
+        label: s.locked ? 'Unlock from screen' : 'Lock on screen',
         click: () => win.webContents.send(IPC.command, 'toggleLock')
       },
       {
@@ -189,7 +394,7 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
           const next = !s.alwaysOnTop
           const updated: Settings = { ...s, alwaysOnTop: next }
           await saveSettings(updated)
-          applyWindowSettings(win, { alwaysOnTop: next })
+          applyWindowSettings(win, { alwaysOnTop: updated.locked || next })
           win.webContents.send(IPC.settingsUpdated, updated)
         }
       },
@@ -239,10 +444,31 @@ export function applyWindowSettings(win: BrowserWindow, payload: WindowApplyPayl
     return
   }
 
-  if (payload.opacity !== undefined) {
-    const op = Math.max(0.3, Math.min(1.0, payload.opacity))
-    win.setOpacity(op)
+  if (payload.minimize) {
+    manualMinimizeAllowed = true
+    win.setMinimizable(true)
+    win.minimize()
+    setTimeout(() => {
+      manualMinimizeAllowed = false
+    }, 300)
+    return
   }
+
+  if (payload.toggleMaximize) {
+    if (win.isMaximized()) {
+      win.unmaximize()
+    } else {
+      win.maximize()
+    }
+    return
+  }
+
+  if (payload.close) {
+    win.close()
+    return
+  }
+
+  // Opacity is rendered via CSS --win-opacity on .app-viewport inside the transparent BrowserWindow
 
   if (payload.alwaysOnTop !== undefined) {
     if (payload.alwaysOnTop) {
@@ -253,25 +479,31 @@ export function applyWindowSettings(win: BrowserWindow, payload: WindowApplyPayl
   }
 
   if (payload.locked !== undefined) {
-    win.setMovable(!payload.locked)
-    win.setResizable(!payload.locked)
+    windowLocked = payload.locked
+    win.setMinimizable(!payload.locked)
     if (payload.locked) {
       win.setAlwaysOnTop(true, 'screen-saver')
-    } else {
+    } else if (payload.alwaysOnTop === undefined) {
       win.setAlwaysOnTop(false)
     }
   }
 
   if (payload.sizePreset) {
+    if (win.isMaximized()) {
+      win.unmaximize()
+    }
     switch (payload.sizePreset) {
       case 'Column':
-        win.setSize(360, 640)
+        win.setSize(398, 678)
         break
       case 'Compact':
-        win.setSize(400, 400)
+        win.setSize(438, 438)
         break
       case 'Wide':
-        win.setSize(900, 360)
+        win.setSize(938, 398)
+        break
+      case 'Stage':
+        win.setSize(1280, 720)
         break
     }
   }

@@ -6,7 +6,8 @@ import type {
   WindowApplyPayload,
   MetricsMarkPayload,
   AIProviderId,
-  AIStreamStartPayload
+  AIStreamStartPayload,
+  ResizeEdge
 } from '../shared/types'
 import {
   loadSettings,
@@ -18,7 +19,17 @@ import {
   clearSessions,
   pruneSessions
 } from './storage'
-import { applyWindowSettings, getMainWindow } from './window'
+import {
+  applyWindowSettings,
+  getMainWindow,
+  startHandleDrag,
+  moveHandleDrag,
+  endHandleDrag,
+  startWindowResize,
+  moveWindowResize,
+  endWindowResize,
+  setWindowIgnoreMouse
+} from './window'
 import { importFile, openFileDialog } from './files'
 import { metrics, isMetricsEnabled } from './metrics'
 import { importFromClipboard, startClipboardWatcher, stopClipboardWatcher } from './clipboard'
@@ -29,7 +40,7 @@ import {
   updateAppBridgeConfig
 } from './bridge'
 import { setSecretKey, hasSecretKey, deleteSecretKey } from './secrets'
-import { abortAiStream, runAiStream } from './ai/client'
+import { abortAiStream, listProviderModels, runAiStream } from './ai/client'
 
 export function setupIpc(): void {
   ipcMain.handle(IPC.settingsGet, async () => {
@@ -63,9 +74,15 @@ export function setupIpc(): void {
     if (win) {
       applyWindowSettings(win, {
         opacity: patch.opacity,
-        alwaysOnTop: patch.alwaysOnTop,
+        alwaysOnTop: patch.alwaysOnTop !== undefined || patch.locked !== undefined
+          ? updated.locked || updated.alwaysOnTop
+          : undefined,
         locked: patch.locked
       })
+    }
+
+    if (patch.sessionPruneAgeDays !== undefined) {
+      await pruneSessions()
     }
 
     if (patch.clipboardWatch !== undefined) {
@@ -120,7 +137,7 @@ export function setupIpc(): void {
 
   ipcMain.handle(IPC.clipboardImport, async () => {
     const win = getMainWindow()
-    if (win) importFromClipboard(win)
+    if (win) await importFromClipboard(win)
   })
 
   ipcMain.handle(IPC.shortcutsConflicts, async () => {
@@ -130,6 +147,34 @@ export function setupIpc(): void {
   ipcMain.handle(IPC.windowApply, async (_e, payload: WindowApplyPayload) => {
     const win = getMainWindow()
     if (win) applyWindowSettings(win, payload)
+  })
+
+  ipcMain.on(IPC.windowDragStart, () => {
+    startHandleDrag()
+  })
+
+  ipcMain.on(IPC.windowDragMove, () => {
+    moveHandleDrag()
+  })
+
+  ipcMain.on(IPC.windowDragEnd, () => {
+    endHandleDrag()
+  })
+
+  ipcMain.on(IPC.windowResizeStart, (_e, edge: ResizeEdge) => {
+    startWindowResize(edge)
+  })
+
+  ipcMain.on(IPC.windowResizeMove, () => {
+    moveWindowResize()
+  })
+
+  ipcMain.on(IPC.windowResizeEnd, () => {
+    endWindowResize()
+  })
+
+  ipcMain.on(IPC.windowSetIgnoreMouse, (_e, ignore: boolean) => {
+    setWindowIgnoreMouse(Boolean(ignore))
   })
 
   ipcMain.handle(IPC.metricsEnabled, async () => {
@@ -201,5 +246,10 @@ export function setupIpc(): void {
 
   ipcMain.handle(IPC.aiStreamAbort, (_e, streamId?: string) => {
     return abortAiStream(streamId)
+  })
+
+  ipcMain.handle(IPC.aiListModels, async (_e, provider: AIProviderId, ollamaUrl?: string) => {
+    const settings = await loadSettings()
+    return listProviderModels(provider, ollamaUrl ?? settings.ollamaUrl)
   })
 }

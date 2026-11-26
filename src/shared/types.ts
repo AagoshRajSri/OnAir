@@ -29,29 +29,59 @@ export type ShortcutId =
 
 export interface Settings {
   version: 1
+  // ── Presentation stage ──────────────────────────────────────
   theme: ThemeId
   fontFamily: string
-  fontSize: number // 8 to 200
-  fontWeight: 400 | 700
-  lineHeight: number // 1.0 to 3.0
-  letterSpacing: number // -2 to 10
-  padding: number // 0 to 64
+  fontSize: number           // 8–200
+  fontWeight: number         // 100–900 (variable weight)
+  lineHeight: number         // 1.0–3.0
+  letterSpacing: number      // -2–10 px
+  padding: number            // 0–80 px
   textAlign: 'left' | 'center' | 'right' | 'justify'
   textColor: string
   bgColor: string
-  opacity: number // 0.30 to 1.00
+  textShadow: boolean        // subtle glow behind text for readability
+  textShadowColor: string    // shadow / glow color (hex)
+  textShadowBlur: number     // 0–32 px blur radius
+  maxContentWidth: number    // 0 = full width, or 320–1400 px centered column
+  mirrorX: boolean           // horizontal flip for glass beam-splitter teleprompters
+  mirrorY: boolean           // vertical flip for inverted teleprompter rigs
+  readingGuide: boolean      // horizontal optical eye-line focus band in Flow mode
+  // ── Chrome / UI appearance ──────────────────────────────────
+  uiAccentColor: string      // replaces amber accent (#f59e0b default)
+  uiSurfaceColor: string     // chrome panel bg (#0d0d0d default)
+  showChromeBorder: boolean  // hairline borders on toolbar / tab bar
+  showScrollbar: boolean     // show thin reader scrollbar
+  toolbarMode: 'hover' | 'always' | 'minimal'
+  uiTransitionSpeed: 'none' | 'fast' | 'normal' | 'slow'
+  // ── Window ──────────────────────────────────────────────────
+  opacity: number            // 0.30–1.00
   alwaysOnTop: boolean
   locked: boolean
-  autoScrollSpeed: number // 10 to 400
+  minimizeOnBlur: boolean    // minimize when unlocked and clicking away
+  cursorHideOnPlay: boolean  // hide mouse cursor while teleprompter plays/scrolls
+  // ── Scroll & Playback ───────────────────────────────────────
+  autoScrollSpeed: number    // 10–400
+  pauseScrollOnHover: boolean
+  autoScrollLoop: boolean
+  // ── Tabs & Clipboard ────────────────────────────────────────
+  openLastSessionOnStartup: boolean // true = open last session on startup; false = start with a new tab
+  openInNewTab: boolean      // open non-bridge imports in a new tab vs replace current
   clipboardWatch: boolean
   saveWatchedToHistory: boolean
+  // ── Reading ─────────────────────────────────────────────────
   pageMode: boolean
   readingMode: ReadingMode
-  rsvpWpm: number // 150 to 1000, step 25
-  bionicStrength: number // 0.2 to 0.7
+  rsvpWpm: number            // 150–1000, step 25
+  rsvpOrpColor: string       // focal character highlight color
+  bionicStrength: number     // 0.2–0.7
+  // ── History ─────────────────────────────────────────────────
+  sessionPruneAgeDays: number // 1–90, 0 = never
+  // ── AI ──────────────────────────────────────────────────────
   aiProvider: AIProviderId
   aiModel: string
   ollamaUrl: string
+  // ── System ──────────────────────────────────────────────────
   bounds: { x: number; y: number; width: number; height: number } | null
   bridgePort: number
   bridgeToken: string
@@ -61,6 +91,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
+  // Presentation stage
   theme: 'obsidian',
   fontFamily: 'Segoe UI',
   fontSize: 28,
@@ -71,19 +102,48 @@ export const DEFAULT_SETTINGS: Settings = {
   textAlign: 'left',
   textColor: '#e6e8ec',
   bgColor: '#0f1115',
+  textShadow: false,
+  textShadowColor: '#ffffff',
+  textShadowBlur: 8,
+  maxContentWidth: 0,
+  mirrorX: false,
+  mirrorY: false,
+  readingGuide: false,
+  // Chrome / UI
+  uiAccentColor: '#f59e0b',
+  uiSurfaceColor: '#0d0d0d',
+  showChromeBorder: true,
+  showScrollbar: true,
+  toolbarMode: 'hover',
+  uiTransitionSpeed: 'normal',
+  // Window
   opacity: 1,
   alwaysOnTop: true,
   locked: false,
+  minimizeOnBlur: false,
+  cursorHideOnPlay: false,
+  // Scroll
   autoScrollSpeed: 60,
+  pauseScrollOnHover: false,
+  autoScrollLoop: false,
+  // Tabs & Clipboard
+  openLastSessionOnStartup: false,
+  openInNewTab: true,
   clipboardWatch: false,
   saveWatchedToHistory: false,
-  pageMode: true,
+  // Reading
+  pageMode: false,
   readingMode: 'flow',
   rsvpWpm: 350,
+  rsvpOrpColor: '#ff5252',
   bionicStrength: 0.4,
+  // History
+  sessionPruneAgeDays: 7,
+  // AI
   aiProvider: 'ollama',
   aiModel: 'llama3.2',
   ollamaUrl: 'http://127.0.0.1:11434',
+  // System
   bounds: null,
   bridgePort: 47821,
   bridgeToken: '',
@@ -146,6 +206,14 @@ export const IPC = {
   command: 'command',
   toast: 'toast',
   windowApply: 'window:apply',
+  windowDragStart: 'window:drag-start',
+  windowDragMove: 'window:drag-move',
+  windowDragEnd: 'window:drag-end',
+  windowResizeStart: 'window:resize-start',
+  windowResizeMove: 'window:resize-move',
+  windowResizeEnd: 'window:resize-end',
+  windowSetIgnoreMouse: 'window:set-ignore-mouse',
+  windowMaximizeChanged: 'window:maximize-changed',
   settingsUpdated: 'settings:updated',
   metricsMark: 'metrics:mark',
   metricsEnabled: 'metrics:enabled',
@@ -154,6 +222,7 @@ export const IPC = {
   bridgeTokenRegenerate: 'bridge:token-regenerate',
   aiStreamStart: 'ai:stream-start',
   aiStreamAbort: 'ai:stream-abort',
+  aiListModels: 'ai:list-models',
   aiStreamChunk: 'ai:stream-chunk',
   aiStreamDone: 'ai:stream-done',
   aiStreamError: 'ai:stream-error',
@@ -204,12 +273,17 @@ export interface ContentIncomingPayload {
   bridgeSentAt?: number
 }
 
+export type ResizeEdge = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se'
+
 export interface WindowApplyPayload {
   opacity?: number
   alwaysOnTop?: boolean
   locked?: boolean
   hidden?: boolean
-  sizePreset?: 'Column' | 'Compact' | 'Wide'
+  minimize?: boolean
+  toggleMaximize?: boolean
+  close?: boolean
+  sizePreset?: 'Column' | 'Compact' | 'Wide' | 'Stage'
 }
 
 export interface MetricsMarkPayload {

@@ -11,7 +11,8 @@ import type {
   AIStreamStartPayload,
   AIStreamChunkPayload,
   AIStreamDonePayload,
-  AIStreamErrorPayload
+  AIStreamErrorPayload,
+  ResizeEdge
 } from '../shared/types'
 import { IPC } from '../shared/types'
 
@@ -54,6 +55,34 @@ contextBridge.exposeInMainWorld('api', {
   windowApply: (payload: WindowApplyPayload): Promise<void> =>
     ipcRenderer.invoke(IPC.windowApply, payload),
 
+  windowDragStart: (): void => {
+    ipcRenderer.send(IPC.windowDragStart)
+  },
+
+  windowDragMove: (): void => {
+    ipcRenderer.send(IPC.windowDragMove)
+  },
+
+  windowDragEnd: (): void => {
+    ipcRenderer.send(IPC.windowDragEnd)
+  },
+
+  windowResizeStart: (edge: ResizeEdge): void => {
+    ipcRenderer.send(IPC.windowResizeStart, edge)
+  },
+
+  windowResizeMove: (): void => {
+    ipcRenderer.send(IPC.windowResizeMove)
+  },
+
+  windowResizeEnd: (): void => {
+    ipcRenderer.send(IPC.windowResizeEnd)
+  },
+
+  windowSetIgnoreMouse: (ignore: boolean): void => {
+    ipcRenderer.send(IPC.windowSetIgnoreMouse, ignore)
+  },
+
   bridgeStatusGet: (): Promise<BridgeStatus> =>
     ipcRenderer.invoke(IPC.bridgeStatusGet),
 
@@ -74,6 +103,9 @@ contextBridge.exposeInMainWorld('api', {
 
   aiStreamAbort: (streamId?: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.aiStreamAbort, streamId),
+
+  aiListModels: (provider: AIProviderId, ollamaUrl?: string): Promise<string[]> =>
+    ipcRenderer.invoke(IPC.aiListModels, provider, ollamaUrl),
 
   // ── Fire-and-forget ──────────────────────────────────────────
   metricsEnabled: (): Promise<boolean> =>
@@ -130,6 +162,12 @@ contextBridge.exposeInMainWorld('api', {
     const handler = (_event: Electron.IpcRendererEvent, payload: AIStreamErrorPayload): void => cb(payload)
     ipcRenderer.on(IPC.aiStreamError, handler)
     return () => ipcRenderer.off(IPC.aiStreamError, handler)
+  },
+
+  onMaximizeChanged: (cb: (maximized: boolean) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, maximized: boolean): void => cb(maximized)
+    ipcRenderer.on(IPC.windowMaximizeChanged, handler)
+    return () => ipcRenderer.off(IPC.windowMaximizeChanged, handler)
   },
 
   // ── Utility ──────────────────────────────────────────────────

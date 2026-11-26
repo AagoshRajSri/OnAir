@@ -15,7 +15,7 @@ All installed package versions are recorded here per the build spec.
 
 | Package | Version | Reason |
 |---------|---------|--------|
-| electron | 36.4.0 | Latest stable Electron at scaffold time (Nov 2026) |
+| electron | 45.5.0 | Latest stable Electron (upgraded from 36.4.0 to fix Windows transparent/frameless titlebar leak) |
 | react | 19.1.0 | UI framework per spec |
 | react-dom | 19.1.0 | React DOM renderer |
 | pdfjs-dist | 4.9.155 | PDF text extraction (spec §6.3) |

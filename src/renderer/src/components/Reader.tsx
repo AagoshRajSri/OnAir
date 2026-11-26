@@ -27,6 +27,7 @@ interface ReaderProps {
   text: string
   settings: Settings
   currentSession: Session | null
+  isStreaming?: boolean
   commandEvent: { cmd: ShortcutId; seq: number } | null
   onSentenceChange: (index: number) => void
   onSettingsChange: (patch: Partial<Settings>) => void
@@ -36,6 +37,7 @@ export default function Reader({
   text,
   settings,
   currentSession,
+  isStreaming = false,
   commandEvent,
   onSentenceChange,
   onSettingsChange
@@ -48,9 +50,19 @@ export default function Reader({
   const [windowHeight, setWindowHeight] = useState(window.innerHeight)
   const scrollerRef = useRef(new AutoScroller())
   const savedScrollTopRef = useRef(0)
-  const prevSessionIdRef = useRef<string | null>(currentSession?.id ?? null)
+  const prevSessionKeyRef = useRef<string>(
+    `${currentSession?.id ?? ''}:${currentSession?.createdAt ?? 0}:${currentSession?.bridgeMessageId ?? ''}`
+  )
+  const scrollSessionKey = currentSession
+    ? `${currentSession.id}:${currentSession.createdAt}:${currentSession.bridgeMessageId ?? ''}`
+    : '__text__'
+  const scrollSessionKeyRef = useRef(scrollSessionKey)
+  scrollSessionKeyRef.current = scrollSessionKey
+  const isStreamingRef = useRef(isStreaming)
+  isStreamingRef.current = isStreaming
+  const finishedScrollKeyRef = useRef<string | null>(null)
   const prevScrollAnchorRef = useRef({
-    sessionId: currentSession?.id ?? null,
+    sessionKey: prevSessionKeyRef.current,
     index: 0,
     pageMode: settings.pageMode,
     text
@@ -70,17 +82,20 @@ export default function Reader({
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // Initialize sentence index on session switch; preserve & clamp on in-place text updates
+  // Initialize sentence index on session switch or in-place tab replacement; clamp on streaming updates
   useEffect(() => {
-    const currentId = currentSession?.id ?? null
+    const currentKey = currentSession
+      ? `${currentSession.id}:${currentSession.createdAt}:${currentSession.bridgeMessageId ?? ''}`
+      : ''
     const maxIdx = Math.max(0, sentences.length - 1)
 
-    if (prevSessionIdRef.current !== currentId) {
-      prevSessionIdRef.current = currentId
+    if (prevSessionKeyRef.current !== currentKey) {
+      prevSessionKeyRef.current = currentKey
       const initial = currentSession ? Math.max(0, Math.min(currentSession.sentenceIndex, maxIdx)) : 0
       sentenceIndexRef.current = initial
       setSentenceIndex(initial)
       savedScrollTopRef.current = 0
+      finishedScrollKeyRef.current = null
       scrollerRef.current.stop()
       setScrolling(false)
       setShowEnd(false)
@@ -92,19 +107,21 @@ export default function Reader({
       sentenceIndexRef.current = next
       return next
     })
-  }, [currentSession?.id, sentences.length])
+  }, [currentSession?.id, currentSession?.createdAt, currentSession?.bridgeMessageId, sentences.length])
 
-  // Preserve scrollTop on in-place updates; scroll active sentence on navigation or mode/session switch
+  // Preserve scrollTop on streaming updates; scroll active sentence on navigation or mode/session switch
   useLayoutEffect(() => {
-    const currentId = currentSession?.id ?? null
+    const currentKey = currentSession
+      ? `${currentSession.id}:${currentSession.createdAt}:${currentSession.bridgeMessageId ?? ''}`
+      : ''
     const prev = prevScrollAnchorRef.current
     const textChangedInPlace =
-      prev.sessionId === currentId &&
+      prev.sessionKey === currentKey &&
       prev.pageMode === settings.pageMode &&
       prev.text !== text
 
     prevScrollAnchorRef.current = {
-      sessionId: currentId,
+      sessionKey: currentKey,
       index: clampedIndex,
       pageMode: settings.pageMode,
       text
@@ -113,13 +130,13 @@ export default function Reader({
     if (sentences.length === 0) return
 
     if (textChangedInPlace) {
-      if (containerRef.current) {
+      if (containerRef.current && !scrollerRef.current.isRunning()) {
         containerRef.current.scrollTop = savedScrollTopRef.current
       }
       return
     }
 
-    if (settings.pageMode) {
+    if (settings.pageMode || clampedIndex === 0) {
       if (containerRef.current) {
         containerRef.current.scrollTop = 0
         savedScrollTopRef.current = 0
@@ -129,7 +146,7 @@ export default function Reader({
 
     const el = containerRef.current?.querySelector(`[data-i="${clampedIndex}"]`)
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [clampedIndex, currentSession?.id, sentences.length, settings.pageMode, text])
+  }, [clampedIndex, currentSession?.id, currentSession?.createdAt, currentSession?.bridgeMessageId, sentences.length, settings.pageMode, text])
 
   const goToSentence = useCallback(
     (next: number) => {
@@ -143,13 +160,42 @@ export default function Reader({
     [sentences.length, onSentenceChange]
   )
 
+  useEffect(() => {
+    scrollerRef.current.setStreaming(isStreaming)
+  }, [isStreaming])
+
+  useEffect(() => {
+    scrollerRef.current.setLoop(settings.autoScrollLoop)
+  }, [settings.autoScrollLoop])
+
+  useEffect(() => {
+    if (!settings.pauseScrollOnHover) {
+      scrollerRef.current.setHoverPaused(false)
+    }
+  }, [settings.pauseScrollOnHover])
+
+  useEffect(() => {
+    scrollerRef.current.setSpeed(settings.autoScrollSpeed)
+  }, [settings.autoScrollSpeed])
+
   // Autoscroll control
   const startScroll = useCallback(() => {
     if (!containerRef.current) return
+    const container = containerRef.current
+    const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight)
+    if (!isStreaming && maxScroll > 0 && container.scrollTop >= maxScroll - 2) {
+      container.scrollTop = 0
+      savedScrollTopRef.current = 0
+    }
+    scrollerRef.current.setStreaming(isStreaming)
+    scrollerRef.current.setLoop(settings.autoScrollLoop)
     scrollerRef.current.start(
-      containerRef.current,
+      container,
       settings.autoScrollSpeed,
       () => {
+        if (!isStreamingRef.current) {
+          finishedScrollKeyRef.current = scrollSessionKeyRef.current
+        }
         setScrolling(false)
         setShowEnd(true)
         setTimeout(() => setShowEnd(false), 1500)
@@ -168,7 +214,7 @@ export default function Reader({
       }
     )
     setScrolling(true)
-  }, [settings.autoScrollSpeed])
+  }, [settings.autoScrollSpeed, settings.autoScrollLoop, isStreaming])
 
   const stopScroll = useCallback(() => {
     scrollerRef.current.stop()
@@ -176,9 +222,26 @@ export default function Reader({
   }, [])
 
   const toggleScroll = useCallback(() => {
-    if (scrolling) stopScroll()
-    else startScroll()
+    if (scrolling) {
+      stopScroll()
+    } else {
+      finishedScrollKeyRef.current = null
+      startScroll()
+    }
   }, [scrolling, startScroll, stopScroll])
+
+  // Cleanup autoscroller RAF on unmount
+  useEffect(() => {
+    return () => scrollerRef.current.stop()
+  }, [])
+
+  // Stop scrolling automatically if switched to RSVP, Page mode, or cleared text;
+  // never auto-start scrolling on its own.
+  useEffect(() => {
+    if ((settings.pageMode || settings.readingMode === 'rsvp' || !text) && scrollerRef.current.isRunning()) {
+      stopScroll()
+    }
+  }, [settings.pageMode, settings.readingMode, text, stopScroll])
 
   const stepSentence = useCallback(
     (delta: 1 | -1) => {
@@ -271,6 +334,7 @@ export default function Reader({
         sessionId={currentSession?.id ?? null}
         wpm={settings.rsvpWpm}
         windowHeight={windowHeight}
+        cursorHideOnPlay={settings.cursorHideOnPlay}
         commandEvent={commandEvent}
         onWpmChange={(nextWpm) => onSettingsChange({ rsvpWpm: nextWpm })}
         onWheel={handleWheel}
@@ -281,94 +345,155 @@ export default function Reader({
   if (!text) {
     return (
       <div
-        className="reader-container"
+        className={`reader-container${!settings.showScrollbar ? ' scrollbar-hidden' : ''}`}
         ref={containerRef}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}
       >
-        <div className="empty-state">Paste, type, drag a file here, or press Ctrl+Alt+V.</div>
+        <div className="empty-state">
+          <svg className="empty-state-icon" viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round">
+            <rect x="6" y="4" width="28" height="32" rx="3" />
+            <path d="M12 14h16M12 20h16M12 26h10" strokeLinecap="round" />
+          </svg>
+          <p className="empty-state-heading">No script loaded</p>
+          <p className="empty-state-hint">
+            Paste, type, or drag a file here<br />
+            or press <span className="kbd">Ctrl+Alt+V</span> from anywhere
+          </p>
+        </div>
       </div>
     )
   }
 
   const showNavBar = sentences.length > 0 && windowHeight >= 72
   const isBionic = settings.readingMode === 'bionic'
+  const hideStageCursor = settings.cursorHideOnPlay && (scrolling || isStreaming)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div
-        className="reader-container"
-        ref={containerRef}
-        tabIndex={0}
-        onKeyDown={handleKeyDown}
-        onWheel={handleWheel}
-        onScroll={() => {
-          if (containerRef.current) {
-            savedScrollTopRef.current = containerRef.current.scrollTop
-          }
-        }}
-        style={{ flex: 1, minHeight: 0, outline: 'none' }}
-      >
-        <div className="reader-content">
-          {settings.pageMode ? (
-            <span data-i={clampedIndex}>
-              {isBionic ? (
-                <BionicText
-                  text={sentences[clampedIndex]?.text.trimStart() ?? ''}
-                  strength={settings.bionicStrength}
-                />
-              ) : (
-                sentences[clampedIndex]?.text.trimStart()
-              )}
-            </span>
-          ) : (
-            sentences.map((seg) => (
-              <span
-                key={seg.index}
-                data-i={seg.index}
-                className={`sentence-span${clampedIndex === seg.index ? ' active' : ''}`}
-                onClick={() => goToSentence(seg.index)}
-              >
+      <div className={`reader-stage-wrap${hideStageCursor ? ' cursor-hide' : ''}`}>
+        {settings.readingGuide && !settings.pageMode && (
+          <div className="reading-guide-band" aria-hidden="true" />
+        )}
+        <div
+          className={`reader-container${!settings.showScrollbar ? ' scrollbar-hidden' : ''}`}
+          ref={containerRef}
+          tabIndex={0}
+          onKeyDown={handleKeyDown}
+          onWheel={handleWheel}
+          onMouseEnter={() => {
+            if (settings.pauseScrollOnHover && scrollerRef.current.isRunning()) {
+              scrollerRef.current.setHoverPaused(true)
+            }
+          }}
+          onMouseLeave={() => {
+            if (settings.pauseScrollOnHover) {
+              scrollerRef.current.setHoverPaused(false)
+            }
+          }}
+          onScroll={() => {
+            if (containerRef.current) {
+              savedScrollTopRef.current = containerRef.current.scrollTop
+            }
+          }}
+          style={{ flex: 1, minHeight: 0, outline: 'none' }}
+        >
+          <div className="reader-content">
+            {settings.pageMode ? (
+              <span data-i={clampedIndex}>
                 {isBionic ? (
-                  <BionicText text={seg.text} strength={settings.bionicStrength} />
+                  <BionicText
+                    text={sentences[clampedIndex]?.text.trimStart() ?? ''}
+                    strength={settings.bionicStrength}
+                  />
                 ) : (
-                  seg.text
+                  sentences[clampedIndex]?.text.trimStart()
                 )}
               </span>
-            ))
-          )}
+            ) : (
+              sentences.map((seg) => (
+                <span
+                  key={seg.index}
+                  data-i={seg.index}
+                  className={`sentence-span${clampedIndex === seg.index ? ' active' : ''}`}
+                  onClick={() => {
+                    if (window.getSelection()?.toString()) return
+                    goToSentence(seg.index)
+                  }}
+                >
+                  {isBionic ? (
+                    <BionicText text={seg.text} strength={settings.bionicStrength} />
+                  ) : (
+                    seg.text
+                  )}
+                </span>
+              ))
+            )}
+          </div>
+          {showEnd && <div className="end-banner">End</div>}
         </div>
-        {showEnd && <div className="end-banner">End</div>}
       </div>
 
       {showNavBar && (
         <div className="reader-nav-bar">
-          <button
-            type="button"
-            className="reader-nav-btn"
-            aria-label="Previous sentence"
-            title="Previous sentence (Left / Ctrl+Alt+Left)"
-            disabled={clampedIndex <= 0}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => stepSentence(-1)}
-          >
-            ←
-          </button>
+          {/* Left: prev + counter */}
+          <div className="reader-nav-left">
+            <button
+              type="button"
+              className="reader-nav-btn"
+              aria-label="Previous sentence"
+              title="Previous sentence (Left / Ctrl+Alt+Left)"
+              disabled={clampedIndex <= 0}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => stepSentence(-1)}
+            >
+              ←
+            </button>
+            <span className="reader-nav-count" title="Current / Total sentences">
+              {clampedIndex + 1} / {sentences.length}
+            </span>
+            <button
+              type="button"
+              className="reader-nav-btn"
+              aria-label="Next sentence"
+              title="Next sentence (Right / Ctrl+Alt+Right)"
+              disabled={clampedIndex >= sentences.length - 1}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => stepSentence(1)}
+            >
+              →
+            </button>
+          </div>
 
-          <span className="reader-nav-count" title="Current statement / Total statements">
-            {clampedIndex + 1} / {sentences.length}
-          </span>
-
-          <button
-            type="button"
-            className="reader-nav-btn"
-            aria-label="Next sentence"
-            title="Next sentence (Right / Ctrl+Alt+Right)"
-            disabled={clampedIndex >= sentences.length - 1}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => stepSentence(1)}
-          >
-            →
-          </button>
+          {/* Right: scroll toggle */}
+          {!settings.pageMode && (
+            <div className="reader-nav-right">
+              <button
+                type="button"
+                className={`reader-nav-btn${scrolling ? ' scroll-active' : ''}`}
+                aria-label={scrolling ? 'Pause teleprompter scroll' : 'Start teleprompter scroll'}
+                title="Toggle teleprompter scrolling (Space / Ctrl+Alt+Space)"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={toggleScroll}
+              >
+                {scrolling ? (
+                  <>
+                    <svg width="9" height="9" viewBox="0 0 9 9" fill="currentColor" style={{ flexShrink: 0 }}>
+                      <rect x="0" y="0" width="3.5" height="9" rx="1" />
+                      <rect x="5.5" y="0" width="3.5" height="9" rx="1" />
+                    </svg>
+                    Scroll
+                  </>
+                ) : (
+                  <>
+                    <svg width="9" height="9" viewBox="0 0 9 9" fill="currentColor" style={{ flexShrink: 0 }}>
+                      <path d="M1 0.5l7 4-7 4V0.5z" />
+                    </svg>
+                    Scroll
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

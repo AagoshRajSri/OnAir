@@ -8,6 +8,7 @@ interface RsvpViewProps {
   sessionId: string | null
   wpm: number
   windowHeight: number
+  cursorHideOnPlay?: boolean
   commandEvent: { cmd: ShortcutId; seq: number } | null
   onWpmChange: (nextWpm: number) => void
   onWheel?: (e: React.WheelEvent) => void
@@ -23,6 +24,7 @@ export default function RsvpView({
   sessionId,
   wpm,
   windowHeight,
+  cursorHideOnPlay = false,
   commandEvent,
   onWpmChange,
   onWheel
@@ -251,7 +253,11 @@ export default function RsvpView({
       onWheel={onWheel}
       style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, outline: 'none' }}
     >
-      <div className="rsvp-stage" onClick={togglePlay} title="Click or press Space to play/pause">
+      <div
+        className={`rsvp-stage${cursorHideOnPlay && isPlaying ? ' cursor-hide' : ''}`}
+        onClick={togglePlay}
+        title="Click or press Space to play/pause"
+      >
         <div className="rsvp-reticle-guide rsvp-reticle-top" aria-hidden="true" />
         <div className="rsvp-word-grid">
           <span className="rsvp-prefix">{current.prefix}</span>
