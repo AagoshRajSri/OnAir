@@ -7,6 +7,12 @@ export type ThemeId =
   | 'slate'
   | 'custom'
 
+export type ReadingMode = 'flow' | 'rsvp' | 'bionic'
+
+export type AIProviderId = 'ollama' | 'openai' | 'anthropic' | 'gemini' | 'groq'
+
+export type AITransformKind = 'summarize' | 'bullets' | 'simplify'
+
 export type ShortcutId =
   | 'toggleWindow'
   | 'importClipboard'
@@ -18,6 +24,8 @@ export type ShortcutId =
   | 'toggleLock'
   | 'back'
   | 'openSettings'
+  | 'openPrompt'
+  | 'cycleMode'
 
 export interface Settings {
   version: 1
@@ -38,6 +46,12 @@ export interface Settings {
   clipboardWatch: boolean
   saveWatchedToHistory: boolean
   pageMode: boolean
+  readingMode: ReadingMode
+  rsvpWpm: number // 150 to 1000, step 25
+  bionicStrength: number // 0.2 to 0.7
+  aiProvider: AIProviderId
+  aiModel: string
+  ollamaUrl: string
   bounds: { x: number; y: number; width: number; height: number } | null
   bridgePort: number
   bridgeToken: string
@@ -64,6 +78,12 @@ export const DEFAULT_SETTINGS: Settings = {
   clipboardWatch: false,
   saveWatchedToHistory: false,
   pageMode: true,
+  readingMode: 'flow',
+  rsvpWpm: 350,
+  bionicStrength: 0.4,
+  aiProvider: 'ollama',
+  aiModel: 'llama3.2',
+  ollamaUrl: 'http://127.0.0.1:11434',
   bounds: null,
   bridgePort: 47821,
   bridgeToken: '',
@@ -78,7 +98,9 @@ export const DEFAULT_SETTINGS: Settings = {
     toggleScroll: 'Ctrl+Alt+Space',
     toggleLock: 'Ctrl+Alt+L',
     back: 'Ctrl+Alt+B',
-    openSettings: 'Ctrl+Alt+S'
+    openSettings: 'Ctrl+Alt+S',
+    openPrompt: 'Ctrl+Alt+P',
+    cycleMode: 'Ctrl+Alt+M'
   }
 }
 
@@ -97,9 +119,11 @@ export interface BridgeStatus {
 export interface Session {
   id: string // crypto.randomUUID()
   title: string // first 40 characters, line breaks turned into spaces; 'Untitled' if empty
-  source: 'typed' | 'clipboard-hotkey' | 'clipboard-watch' | 'drop-text' | 'file' | 'bridge'
+  source: 'typed' | 'clipboard-hotkey' | 'clipboard-watch' | 'drop-text' | 'file' | 'bridge' | 'ai'
   fileName?: string
   bridgeMessageId?: string
+  aiProvider?: AIProviderId
+  aiPrompt?: string
   text: string
   sentenceIndex: number
   createdAt: number // epoch milliseconds
@@ -127,8 +151,47 @@ export const IPC = {
   metricsEnabled: 'metrics:enabled',
   bridgeStatusGet: 'bridge:status-get',
   bridgeStatusUpdated: 'bridge:status-updated',
-  bridgeTokenRegenerate: 'bridge:token-regenerate'
+  bridgeTokenRegenerate: 'bridge:token-regenerate',
+  aiStreamStart: 'ai:stream-start',
+  aiStreamAbort: 'ai:stream-abort',
+  aiStreamChunk: 'ai:stream-chunk',
+  aiStreamDone: 'ai:stream-done',
+  aiStreamError: 'ai:stream-error',
+  secretsSetKey: 'secrets:set-key',
+  secretsHasKey: 'secrets:has-key',
+  secretsDeleteKey: 'secrets:delete-key'
 } as const
+
+export interface AIStreamStartPayload {
+  streamId: string
+  prompt: string
+  contextText?: string
+  transform?: AITransformKind
+  provider: AIProviderId
+  model: string
+  ollamaUrl?: string
+}
+
+export interface AIStreamChunkPayload {
+  streamId: string
+  delta: string
+  text: string
+  t0: number
+}
+
+export interface AIStreamDonePayload {
+  streamId: string
+  text: string
+  aborted: boolean
+  ttftMs: number | null
+  tokensPerSec: number | null
+  totalTokens: number
+}
+
+export interface AIStreamErrorPayload {
+  streamId: string
+  error: string
+}
 
 export interface ContentIncomingPayload {
   text: string

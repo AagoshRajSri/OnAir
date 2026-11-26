@@ -8,6 +8,10 @@ export function setScrollMetricsEnabled(enabled: boolean): void {
   scrollMetricsEnabled = enabled
 }
 
+export function isMetricsTrackingEnabled(): boolean {
+  return scrollMetricsEnabled
+}
+
 export class AutoScroller {
   private rafId: number | null = null
   private pos = 0

@@ -1,7 +1,11 @@
 import type { ReactElement } from 'react'
+import type { ReadingMode } from '../../../shared/types'
 
 interface ToolbarProps {
   locked: boolean
+  readingMode: ReadingMode
+  onCycleMode: () => void
+  onTogglePrompt: () => void
   onOpenFile: () => void
   onImportClipboard: () => void
   onEdit: () => void
@@ -10,8 +14,17 @@ interface ToolbarProps {
   onHide: () => void
 }
 
+const MODE_LABELS: Record<ReadingMode, string> = {
+  flow: 'Flow',
+  rsvp: 'RSVP',
+  bionic: 'Bionic'
+}
+
 export default function Toolbar({
   locked,
+  readingMode,
+  onCycleMode,
+  onTogglePrompt,
   onOpenFile,
   onImportClipboard,
   onEdit,
@@ -24,6 +37,14 @@ export default function Toolbar({
       <button onClick={onOpenFile} title="Open file (TXT, PDF, DOCX)">📂 Open file</button>
       <button onClick={onImportClipboard} title="Import clipboard (Ctrl+Alt+V / Ctrl+V)">📋 Import clipboard</button>
       <button onClick={onEdit} title="Edit text (Ctrl+E)">✏️ Edit</button>
+      <button onClick={onTogglePrompt} title="Quick AI prompt (Ctrl+Alt+P)">✨ AI</button>
+      <button
+        onClick={onCycleMode}
+        className={readingMode !== 'flow' ? 'active-mode' : ''}
+        title="Cycle reading mode: Flow / RSVP / Bionic (Ctrl+Alt+M)"
+      >
+        ⚡ {MODE_LABELS[readingMode]}
+      </button>
       <button
         onClick={onToggleLock}
         className={locked ? 'active-lock' : ''}

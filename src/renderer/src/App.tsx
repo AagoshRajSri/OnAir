@@ -6,15 +6,23 @@ import type {
   ShortcutId,
   WindowApplyPayload,
   MetricsMarkPayload,
-  BridgeStatus
+  BridgeStatus,
+  AIProviderId,
+  AITransformKind,
+  ReadingMode,
+  AIStreamStartPayload,
+  AIStreamChunkPayload,
+  AIStreamDonePayload,
+  AIStreamErrorPayload
 } from '../../shared/types'
 import { DEFAULT_SETTINGS } from '../../shared/types'
 import { applySettingsToDOM } from './lib/themes'
-import { setScrollMetricsEnabled } from './lib/autoscroll'
+import { setScrollMetricsEnabled, isMetricsTrackingEnabled } from './lib/autoscroll'
 import { splitSentences, clampSentenceIndex } from './lib/sentences'
 import Reader from './components/Reader'
 import Toolbar from './components/Toolbar'
 import SettingsPanel from './components/SettingsPanel'
+import PromptBar from './components/PromptBar'
 
 declare global {
   interface Window {
@@ -33,6 +41,11 @@ declare global {
       windowApply: (payload: WindowApplyPayload) => Promise<void>
       bridgeStatusGet: () => Promise<BridgeStatus>
       bridgeTokenRegenerate: () => Promise<string>
+      secretsSetKey: (provider: AIProviderId, apiKey: string) => Promise<void>
+      secretsHasKey: (provider: AIProviderId) => Promise<boolean>
+      secretsDeleteKey: (provider: AIProviderId) => Promise<void>
+      aiStreamStart: (payload: AIStreamStartPayload) => Promise<void>
+      aiStreamAbort: (streamId?: string) => Promise<boolean>
       metricsEnabled: () => Promise<boolean>
       metricsMark: (payload: MetricsMarkPayload) => void
       onContentIncoming: (cb: (payload: ContentIncomingPayload) => void) => () => void
@@ -40,6 +53,9 @@ declare global {
       onToast: (cb: (msg: string) => void) => () => void
       onSettingsUpdated: (cb: (settings: Settings) => void) => () => void
       onBridgeStatusUpdated: (cb: (status: BridgeStatus) => void) => () => void
+      onAiStreamChunk: (cb: (payload: AIStreamChunkPayload) => void) => () => void
+      onAiStreamDone: (cb: (payload: AIStreamDonePayload) => void) => () => void
+      onAiStreamError: (cb: (payload: AIStreamErrorPayload) => void) => () => void
       getPathForFile: (file: File) => string
     }
   }
@@ -73,6 +89,8 @@ export default function App(): ReactElement {
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [showPromptBar, setShowPromptBar] = useState(false)
+  const [isAiStreaming, setIsAiStreaming] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [showToolbar, setShowToolbar] = useState(false)
   const [windowHeight, setWindowHeight] = useState(window.innerHeight)
@@ -89,6 +107,12 @@ export default function App(): ReactElement {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sentenceSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const bridgeSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const modeSwitchStartRef = useRef<number | null>(null)
+  const activeAiStreamRef = useRef<{
+    streamId: string
+    sessionId: string
+    prePromptSessionId: string | null
+  } | null>(null)
   const tabsRef = useRef<Session[]>([])
   const activeTabIdRef = useRef<string | null>(null)
   const cmdSeq = useRef(0)
@@ -276,6 +300,9 @@ export default function App(): ReactElement {
 
   const handleSettingsChange = useCallback(
     async (patch: Partial<Settings>): Promise<void> => {
+      if (patch.readingMode !== undefined && patch.readingMode !== settings.readingMode) {
+        modeSwitchStartRef.current = performance.timeOrigin + performance.now()
+      }
       const updated: Settings = {
         ...settings,
         ...patch,
@@ -289,6 +316,23 @@ export default function App(): ReactElement {
     },
     [settings]
   )
+
+  useEffect(() => {
+    const startMs = modeSwitchStartRef.current
+    if (startMs === null) return
+    modeSwitchStartRef.current = null
+    if (!isMetricsTrackingEnabled() || !window.api) return
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const paintedAt = performance.timeOrigin + performance.now()
+        window.api.metricsMark({
+          metric: 'mode-switch',
+          phase: 'duration',
+          timeMs: Math.max(0, paintedAt - startMs)
+        })
+      })
+    })
+  }, [settings.readingMode])
 
   const handleToggleLock = useCallback(() => {
     const nextLocked = !settings.locked
@@ -308,6 +352,78 @@ export default function App(): ReactElement {
     }
   }
 
+  const handleCycleMode = useCallback((): void => {
+    const order: ReadingMode[] = ['flow', 'rsvp', 'bionic']
+    const next = order[(order.indexOf(settings.readingMode) + 1) % order.length]
+    handleSettingsChange({ readingMode: next })
+    const label = next === 'flow' ? 'Flow' : next === 'rsvp' ? 'RSVP' : 'Bionic'
+    showToast(`Mode: ${label}`)
+  }, [settings.readingMode, handleSettingsChange, showToast])
+
+  const handleStartAiPrompt = useCallback(
+    (promptText: string, transform?: AITransformKind): void => {
+      if (!window.api) return
+      if (activeAiStreamRef.current) {
+        void window.api.aiStreamAbort(activeAiStreamRef.current.streamId)
+      }
+
+      const currentActiveId = activeTabIdRef.current
+      const currentTab = tabsRef.current.find((t) => t.id === currentActiveId) ?? null
+      const contextText = currentTab?.text.trim() ? currentTab.text : undefined
+      const prePromptSessionId = currentTab && currentTab.text.trim() ? currentTab.id : currentActiveId
+
+      const sessionId = newUuid()
+      const streamId = newUuid()
+      const initialTitle = transform
+        ? transform.charAt(0).toUpperCase() + transform.slice(1)
+        : makeTitle(promptText)
+
+      const newSession: Session = {
+        id: sessionId,
+        title: initialTitle,
+        source: 'ai',
+        aiProvider: settings.aiProvider,
+        aiPrompt: promptText || transform,
+        text: '',
+        sentenceIndex: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }
+
+      const nextTabs =
+        currentTab && currentTab.text === ''
+          ? tabsRef.current.map((t) => (t.id === currentTab.id ? newSession : t))
+          : [...tabsRef.current, newSession]
+      tabsRef.current = nextTabs
+      setTabs(nextTabs)
+      if (prePromptSessionId && prePromptSessionId !== sessionId) {
+        setPreviousSessionId(prePromptSessionId)
+      }
+      activeTabIdRef.current = sessionId
+      setActiveTabId(sessionId)
+      setIsEditing(false)
+
+      activeAiStreamRef.current = { streamId, sessionId, prePromptSessionId }
+      setIsAiStreaming(true)
+
+      void window.api.aiStreamStart({
+        streamId,
+        prompt: promptText,
+        contextText,
+        transform,
+        provider: settings.aiProvider,
+        model: settings.aiModel,
+        ollamaUrl: settings.ollamaUrl
+      })
+    },
+    [settings.aiProvider, settings.aiModel, settings.ollamaUrl]
+  )
+
+  const handleAbortAiPrompt = useCallback((): void => {
+    if (!window.api || !activeAiStreamRef.current) return
+    void window.api.aiStreamAbort(activeAiStreamRef.current.streamId)
+  }, [])
+
   // Handle commands from global shortcuts or context menu
   const handleCommand = useCallback(
     (cmd: ShortcutId): void => {
@@ -315,11 +431,17 @@ export default function App(): ReactElement {
         case 'openSettings':
           setShowSettings((v) => !v)
           break
+        case 'openPrompt':
+          setShowPromptBar((v) => !v)
+          break
         case 'toggleLock':
           handleToggleLock()
           break
         case 'back':
           handleBack()
+          break
+        case 'cycleMode':
+          handleCycleMode()
           break
         case 'fontUp':
           handleSettingsChange({ fontSize: Math.min(200, settings.fontSize + 2) })
@@ -337,7 +459,7 @@ export default function App(): ReactElement {
           break
       }
     },
-    [settings.fontSize, handleToggleLock, handleSettingsChange, handleBack]
+    [settings.fontSize, handleToggleLock, handleSettingsChange, handleBack, handleCycleMode]
   )
 
   // Register push listeners
@@ -354,18 +476,146 @@ export default function App(): ReactElement {
       setBridgeStatus(status)
     })
 
+    const unAiChunk = window.api.onAiStreamChunk((payload) => {
+      const receivedAt = performance.timeOrigin + performance.now()
+      const active = activeAiStreamRef.current
+      if (!active || active.streamId !== payload.streamId) return
+
+      const nextTabs = tabsRef.current.map((t) => {
+        if (t.id !== active.sessionId) return t
+        const sentenceCount = splitSentences(payload.text).length
+        return {
+          ...t,
+          title: makeTitle(payload.text) || t.title,
+          text: payload.text,
+          sentenceIndex: clampSentenceIndex(t.sentenceIndex, sentenceCount),
+          updatedAt: Date.now()
+        }
+      })
+      tabsRef.current = nextTabs
+      setTabs(nextTabs)
+
+      if (isMetricsTrackingEnabled()) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const paintedAt = performance.timeOrigin + performance.now()
+            window.api.metricsMark({
+              metric: 'ai-chunk-paint',
+              phase: 'duration',
+              timeMs: Math.max(0, paintedAt - receivedAt)
+            })
+          })
+        })
+      }
+    })
+
+    const unAiDone = window.api.onAiStreamDone((payload) => {
+      const active = activeAiStreamRef.current
+      if (!active || active.streamId !== payload.streamId) return
+      activeAiStreamRef.current = null
+      setIsAiStreaming(false)
+
+      if (payload.text.trim()) {
+        let finalized: Session | null = null
+        const nextTabs = tabsRef.current.map((t) => {
+          if (t.id !== active.sessionId) return t
+          const sentenceCount = splitSentences(payload.text).length
+          finalized = {
+            ...t,
+            title: makeTitle(payload.text),
+            text: payload.text,
+            sentenceIndex: clampSentenceIndex(t.sentenceIndex, sentenceCount),
+            updatedAt: Date.now()
+          }
+          return finalized
+        })
+        tabsRef.current = nextTabs
+        setTabs(nextTabs)
+        if (finalized) {
+          void window.api.sessionSave(finalized)
+        }
+        if (payload.aborted) {
+          showToast('Stopped (partial response saved)')
+        } else {
+          setShowPromptBar(false)
+        }
+      } else {
+        // Cancelled before first token arrived: restore previous tab if one existed
+        const filtered = tabsRef.current.filter((t) => t.id !== active.sessionId)
+        tabsRef.current = filtered
+        setTabs(filtered)
+        if (active.prePromptSessionId && filtered.some((t) => t.id === active.prePromptSessionId)) {
+          activeTabIdRef.current = active.prePromptSessionId
+          setActiveTabId(active.prePromptSessionId)
+        } else {
+          const fallbackId = filtered[0]?.id ?? null
+          activeTabIdRef.current = fallbackId
+          setActiveTabId(fallbackId)
+        }
+        if (payload.aborted) {
+          showToast('AI request cancelled')
+        }
+      }
+    })
+
+    const unAiError = window.api.onAiStreamError((payload) => {
+      const active = activeAiStreamRef.current
+      if (!active || active.streamId !== payload.streamId) return
+      activeAiStreamRef.current = null
+      setIsAiStreaming(false)
+
+      const failedTab = tabsRef.current.find((t) => t.id === active.sessionId)
+      if (failedTab && !failedTab.text.trim()) {
+        const filtered = tabsRef.current.filter((t) => t.id !== active.sessionId)
+        tabsRef.current = filtered
+        setTabs(filtered)
+        if (active.prePromptSessionId && filtered.some((t) => t.id === active.prePromptSessionId)) {
+          activeTabIdRef.current = active.prePromptSessionId
+          setActiveTabId(active.prePromptSessionId)
+        }
+      } else if (failedTab) {
+        void window.api.sessionSave(failedTab)
+      }
+    })
+
     return () => {
       unContent()
       unCommand()
       unToast()
       unSettings()
       unBridge()
+      unAiChunk()
+      unAiDone()
+      unAiError()
     }
   }, [handleNewContent, handleCommand, showToast])
 
-  // Local keydowns: Ctrl+E (Edit) and Ctrl+V (Paste into new tab when not editing)
+  // Local keydowns: Esc aborts AI stream, Ctrl+Alt+P/M fallbacks, Ctrl+E (Edit), Ctrl+V (Paste)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && activeAiStreamRef.current) {
+        e.preventDefault()
+        handleAbortAiPrompt()
+        return
+      }
+      if (e.ctrlKey && e.altKey && !e.shiftKey) {
+        const k = e.key.toLowerCase()
+        if (k === 'p') {
+          e.preventDefault()
+          setShowPromptBar((v) => !v)
+          return
+        }
+        if (k === 'm') {
+          e.preventDefault()
+          handleCycleMode()
+          return
+        }
+        if (k === 'b') {
+          e.preventDefault()
+          void handleBack()
+          return
+        }
+      }
       if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'e' || e.key === 'E')) {
         e.preventDefault()
         setIsEditing((v) => !v)
@@ -378,7 +628,7 @@ export default function App(): ReactElement {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isEditing])
+  }, [isEditing, handleAbortAiPrompt, handleCycleMode, handleBack])
 
   const handleEditSave = useCallback(
     async (newText: string): Promise<void> => {
@@ -577,12 +827,27 @@ export default function App(): ReactElement {
       {showToolbar && windowHeight >= 100 && !isEditing && (
         <Toolbar
           locked={settings.locked}
+          readingMode={settings.readingMode}
+          onCycleMode={handleCycleMode}
+          onTogglePrompt={() => setShowPromptBar((v) => !v)}
           onOpenFile={handleOpenFile}
           onImportClipboard={() => window.api.clipboardImport()}
           onEdit={() => setIsEditing(true)}
           onToggleLock={handleToggleLock}
           onSettings={() => setShowSettings((v) => !v)}
           onHide={() => window.api.windowApply({ hidden: true })}
+        />
+      )}
+
+      {showPromptBar && !isEditing && (
+        <PromptBar
+          hasContextText={text.trim().length > 0}
+          isStreaming={isAiStreaming}
+          provider={settings.aiProvider}
+          model={settings.aiModel}
+          onSubmitPrompt={handleStartAiPrompt}
+          onAbort={handleAbortAiPrompt}
+          onClose={() => setShowPromptBar(false)}
         />
       )}
 

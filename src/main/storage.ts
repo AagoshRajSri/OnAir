@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { promises as fs } from 'fs'
 import { randomBytes } from 'crypto'
-import type { Settings, Session, ThemeId } from '../shared/types'
+import type { Settings, Session, ThemeId, ReadingMode, AIProviderId } from '../shared/types'
 import { DEFAULT_SETTINGS } from '../shared/types'
 
 function getUserDataPath(): string {
@@ -25,6 +25,16 @@ const VALID_THEMES: Set<ThemeId> = new Set([
   'oled-black',
   'slate',
   'custom'
+])
+
+const VALID_READING_MODES: Set<ReadingMode> = new Set(['flow', 'rsvp', 'bionic'])
+
+const VALID_AI_PROVIDERS: Set<AIProviderId> = new Set([
+  'ollama',
+  'openai',
+  'anthropic',
+  'gemini',
+  'groq'
 ])
 
 // ─── Atomic write ──────────────────────────────────────────────
@@ -57,6 +67,20 @@ function clampSettings(s: Settings): Settings {
   if (!VALID_THEMES.has(s.theme)) {
     s.theme = 'obsidian'
   }
+  if (!VALID_READING_MODES.has(s.readingMode)) {
+    s.readingMode = 'flow'
+  }
+  const rawWpm = Math.max(150, Math.min(1000, Number(s.rsvpWpm) || 350))
+  s.rsvpWpm = Math.round(rawWpm / 25) * 25
+  s.bionicStrength = Math.max(0.2, Math.min(0.7, Number(s.bionicStrength) || 0.4))
+  if (!VALID_AI_PROVIDERS.has(s.aiProvider)) {
+    s.aiProvider = 'ollama'
+  }
+  s.aiModel = typeof s.aiModel === 'string' && s.aiModel.trim() ? s.aiModel.trim() : 'llama3.2'
+  s.ollamaUrl =
+    typeof s.ollamaUrl === 'string' && s.ollamaUrl.trim()
+      ? s.ollamaUrl.trim().replace(/\/+$/, '')
+      : 'http://127.0.0.1:11434'
   return s
 }
 

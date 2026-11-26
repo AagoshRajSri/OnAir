@@ -74,6 +74,22 @@
 - **Settings UI**:
   - Dedicated Browser Bridge section displaying live bridge status (`Listening (47821 · 1 active)` / `Port in use`), editable port, Extension ID input, and a copyable/regenerable 64-char pairing token.
 
+### Speed Engine & Streaming AI Pipeline (Phase 3)
+- **Reading Modes (`Ctrl+Alt+M` to cycle)**:
+  - **Flow**: Default smooth paragraph & sentence navigation.
+  - **RSVP**: Rapid Serial Visual Presentation with Optimal Recognition Point (ORP) accent character locked to a fixed horizontal center reticle (zero horizontal jitter), 150–1,000 WPM (step 25, default 350 WPM), and punctuation pause multipliers (`, ; :` 1.5×, `. ! ?` 2.2×, `\n\n` 2.8×). Keyboard controls: `Space` play/pause, `Left`/`Right` step 1 word (`Shift` steps 10 words), `Up`/`Down` ±25 WPM.
+  - **Bionic**: Configurable prefix-bolded fixation scanning (20–70%, default 40%).
+- **Direct Main-Process AI Streaming (`src/main/ai/`)**:
+  - Native Node `fetch` SSE & Ollama NDJSON streaming with zero vendor SDK bloat and a 15-second connection timeout.
+  - Supports **Local Ollama** (`http://127.0.0.1:11434` / `localhost`, zero API key) plus **OpenAI**, **Anthropic**, **Gemini**, and **Groq**.
+  - 16 ms (~60 Hz) leading + trailing chunk coalescer prevents React render thrashing during 300+ tok/s bursts.
+- **Quick-Prompt Bar (`Ctrl+Alt+P`)**:
+  - Inline prompt input + 1-click transform chips (**Summarize**, **Bullets**, **Simplify**) operating on the active session.
+  - Streams directly into a new session (`flow`, `rsvp`, or `bionic`) while preserving the pre-prompt session for instant `Ctrl+Alt+B` revert.
+  - `Esc` or **Stop** cancels the `AbortController` immediately and saves any partial output as a valid session.
+- **DPAPI Encrypted Key Storage (`src/main/secrets.ts`)**:
+  - Cloud API keys are encrypted at rest via Electron `safeStorage` (Windows DPAPI) in `userData/secrets.enc`. Write-only inputs in **AI & Speed Engine** Settings display `"Saved (encrypted)"` + **Clear** without ever reading raw keys back into the renderer.
+
 ---
 
 ## Security Architecture
@@ -86,6 +102,8 @@
 | **Extension Auth** | Timing-safe check | Pairing token validated via `crypto.timingSafeEqual`; Origin validated to exact extension ID |
 | **Attack Rejection** | Fast fail | WebSocket code `1008` issued immediately on auth failure, origin mismatch, or invalid handshake |
 | **Extension Scope** | Least privilege | Manifest V3 permissions restricted to `["contextMenus", "storage"]`; no wildcards or broad hosts |
+| **AI Network Boundary** | Main process only | All HTTP/SSE/NDJSON requests execute solely in `src/main/ai/`; renderer & preload stay 100% offline |
+| **API Key Storage** | DPAPI encrypted | Secrets encrypted at rest in `userData/secrets.enc` via `safeStorage`; renderer only queries `secretsHasKey` boolean |
 | **Screen Capture** | Always visible | Content protection / capture-hiding APIs are **never** used; window remains visible in screen shares |
 
 ---
@@ -104,7 +122,7 @@ npm run dev
 # Run TypeScript type check across all targets (app, node, extension)
 npm run typecheck
 
-# Run full Vitest test suite (60 tests)
+# Run full Vitest test suite (82 tests)
 npm test
 
 # Build production bundles
@@ -163,9 +181,23 @@ Measured end-to-end latency from local WebSocket frame arrival through the Elect
 
 ---
 
+### 3. Speed Engine & Streaming AI Performance (Phase 3)
+Measured directly on the packaged Electron build (`dist/win-unpacked/OnAir.exe`) via `scripts/verify-phase3-e2e.mjs` with `FR_METRICS=1` (33+ trials per local metric, first 3 warm-up trials discarded), strictly separating AI network latency from local renderer paint timing.
+
+| Metric | Category | Trials (Measured) | Median | P95 | Target (Median / P95) |
+|---|---|---:|---:|---:|---|
+| `mode-switch` | Local | 36 (33) | **36.8 ms** | **39.5 ms** | < 100 ms / < 200 ms |
+| `ai-chunk-paint` | Local | 42 (39) | **25.6 ms** | **32.4 ms** | < 33 ms / < 66 ms |
+| `rsvp-jitter` | Local | 39 (36) | **7.8 ms** | **18.1 ms** | < 16 ms / < 32 ms |
+| `ai-ttft-<provider>` | AI / Network | 2 | 50.87 / 3.39 ms | — | Report only (separated) |
+| `ai-tps-<provider>` | AI / Network | 2 | 32.99 / 38.87 tok/s | — | Report only (separated) |
+| RSVP reticle center drift | Visual | 20 words | **0.00 px** | — | 0 px |
+
+---
+
 ## Test Coverage Summary
 
-OnAir maintains **60 automated tests across 8 test suites** (100% passing):
+OnAir maintains **82 automated tests across 12 test suites** (100% passing):
 
 1. **`tests/normalize.test.ts`** (10 tests): CRLF/CR normalization, NUL stripping, trailing whitespace trimming, newline collapsing, edit mode constraints.
 2. **`tests/storage.test.ts`** (8 tests): Session history pruning, 7-day retention limit, 20-session cap, sort order integrity, default settings.
@@ -175,3 +207,7 @@ OnAir maintains **60 automated tests across 8 test suites** (100% passing):
 6. **`tests/bridge.test.ts`** (6 tests): Port & token generation, timing-safe auth, close code 1008 rejection cases, seq ordering, ping/pong, EADDRINUSE resilience.
 7. **`tests/importers.test.ts`** (8 tests): UTF-8 BOM, Windows-1252, selectable PDF extraction, scanned PDF detection, DOCX extraction, oversized file rejection (>10 MB).
 8. **`extension/tests/providers.test.ts`** (10 tests): ChatGPT & Claude DOM adapters against HTML fixtures, streaming indicator detection, 50 ms leading/trailing throttle controller, 1500 ms idle finalization fallback.
+9. **`tests/secrets.test.ts`** (6 tests): Phase 3 default contracts, DPAPI `safeStorage` round-trip, zero plaintext on disk (`secrets.enc`), unavailability refusal, multi-provider deletion.
+10. **`tests/rsvp.test.ts`** (5 tests): ORP index buckets (`1..14+`), punctuation-aware lossless splitting, pause multipliers (`1.5×`, `2.2×`, `2.8×`), 300 WPM timing accuracy (50 words in 10 s).
+11. **`tests/bionic.test.ts`** (4 tests): Prefix length calculation, strength clamping, lossless reconstruction across newlines/punctuation.
+12. **`tests/sse-parser.test.ts`** (7 tests): Split multi-byte UTF-8 / TCP chunk boundaries, `[DONE]` & provider SSE/NDJSON parsers, 16 ms coalescing, HTTP 401/429 error toasts, mid-stream `AbortController` cancellation, localhost-only Ollama URL validation.

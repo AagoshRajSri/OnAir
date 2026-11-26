@@ -5,6 +5,7 @@ import { setupIpc } from './ipc'
 import { loadSettings, pruneSessions } from './storage'
 import { startClipboardWatcher } from './clipboard'
 import { startAppBridge, stopAppBridge } from './bridge'
+import { abortAiStream } from './ai/client'
 import { isMetricsEnabled } from './metrics'
 import { IPC } from '../shared/types'
 
@@ -54,5 +55,6 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   unregisterAll()
+  abortAiStream()
   void stopAppBridge()
 })

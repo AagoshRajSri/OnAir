@@ -68,5 +68,33 @@ describe('Metrics trial persistence across restarts', () => {
     await disabled.record('show-window', 10)
     await expect(fs.access(csvPath)).rejects.toThrow()
   })
+
+  it('records separated Phase 3 local and AI metrics only when enabled', async () => {
+    const off = new Metrics(false, csvPath)
+    await off.record('mode-switch', 25.0)
+    await off.record('ai-chunk-paint', 18.2)
+    await off.record('rsvp-jitter', 4.1)
+    await off.record('ai-ttft-ollama', 120.5)
+    await off.record('ai-tps-ollama', 48.2)
+    await expect(fs.access(csvPath)).rejects.toThrow()
+
+    const on = new Metrics(true, csvPath)
+    await on.record('mode-switch', 25.0)
+    await on.record('ai-chunk-paint', 18.2)
+    await on.record('rsvp-jitter', 4.1)
+    await on.record('ai-ttft-ollama', 120.5)
+    await on.record('ai-tps-ollama', 48.2)
+
+    const content = await fs.readFile(csvPath, 'utf-8')
+    const lines = content.trim().split(/\r?\n/)
+    expect(lines).toEqual([
+      'metric,trial,milliseconds',
+      'mode-switch,1,25.000',
+      'ai-chunk-paint,1,18.200',
+      'rsvp-jitter,1,4.100',
+      'ai-ttft-ollama,1,120.500',
+      'ai-tps-ollama,1,48.200'
+    ])
+  })
 })
 

@@ -1,6 +1,13 @@
 import { ipcMain } from 'electron'
 import { IPC } from '../shared/types'
-import type { Settings, Session, WindowApplyPayload, MetricsMarkPayload } from '../shared/types'
+import type {
+  Settings,
+  Session,
+  WindowApplyPayload,
+  MetricsMarkPayload,
+  AIProviderId,
+  AIStreamStartPayload
+} from '../shared/types'
 import {
   loadSettings,
   saveSettings,
@@ -21,6 +28,8 @@ import {
   getAppBridgeStatus,
   updateAppBridgeConfig
 } from './bridge'
+import { setSecretKey, hasSecretKey, deleteSecretKey } from './secrets'
+import { abortAiStream, runAiStream } from './ai/client'
 
 export function setupIpc(): void {
   ipcMain.handle(IPC.settingsGet, async () => {
@@ -148,5 +157,49 @@ export function setupIpc(): void {
       win.webContents.send(IPC.settingsUpdated, updated)
     }
     return updated.bridgeToken
+  })
+
+  ipcMain.handle(IPC.secretsSetKey, async (_e, provider: AIProviderId, apiKey: string) => {
+    await setSecretKey(provider, apiKey)
+  })
+
+  ipcMain.handle(IPC.secretsHasKey, async (_e, provider: AIProviderId) => {
+    return hasSecretKey(provider)
+  })
+
+  ipcMain.handle(IPC.secretsDeleteKey, async (_e, provider: AIProviderId) => {
+    await deleteSecretKey(provider)
+  })
+
+  ipcMain.handle(IPC.aiStreamStart, async (_e, payload: AIStreamStartPayload) => {
+    const settings = await loadSettings()
+    const sendIfAlive = (channel: string, data: unknown): void => {
+      const win = getMainWindow()
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(channel, data)
+      }
+    }
+
+    void runAiStream(
+      {
+        streamId: payload.streamId,
+        provider: payload.provider,
+        model: payload.model,
+        prompt: payload.prompt,
+        contextText: payload.contextText,
+        transform: payload.transform,
+        ollamaUrl: payload.ollamaUrl ?? settings.ollamaUrl
+      },
+      {
+        onChunk: (chunk) => sendIfAlive(IPC.aiStreamChunk, chunk),
+        onDone: (done) => sendIfAlive(IPC.aiStreamDone, done),
+        onError: (err) => sendIfAlive(IPC.aiStreamError, err),
+        onToast: (msg) => sendIfAlive(IPC.toast, msg)
+      }
+    )
+  })
+
+  ipcMain.handle(IPC.aiStreamAbort, (_e, streamId?: string) => {
+    return abortAiStream(streamId)
   })
 }

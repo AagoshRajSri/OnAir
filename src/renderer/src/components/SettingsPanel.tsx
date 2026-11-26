@@ -1,6 +1,23 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import type { Settings, Session, ThemeId, ShortcutId, BridgeStatus } from '../../../shared/types'
+import type {
+  Settings,
+  Session,
+  ThemeId,
+  ShortcutId,
+  BridgeStatus,
+  AIProviderId
+} from '../../../shared/types'
 import { THEME_PRESETS } from '../lib/themes'
+
+const CLOUD_PROVIDERS: AIProviderId[] = ['openai', 'anthropic', 'gemini', 'groq']
+
+const DEFAULT_MODELS_BY_PROVIDER: Record<AIProviderId, string> = {
+  ollama: 'llama3.2',
+  openai: 'gpt-4o-mini',
+  anthropic: 'claude-sonnet-4-20250514',
+  gemini: 'gemini-2.5-flash',
+  groq: 'llama-3.3-70b-versatile'
+}
 
 interface SettingsPanelProps {
   settings: Settings
@@ -34,7 +51,9 @@ const SHORTCUT_LABELS: Record<ShortcutId, string> = {
   toggleScroll: 'Start / Pause scroll',
   toggleLock: 'Lock position',
   back: 'Back',
-  openSettings: 'Open settings'
+  openSettings: 'Open settings',
+  openPrompt: 'Open quick prompt',
+  cycleMode: 'Cycle reading mode'
 }
 
 function keyEventToAccelerator(e: React.KeyboardEvent): string | null {
@@ -73,11 +92,61 @@ export default function SettingsPanel({
   const [recordingId, setRecordingId] = useState<ShortcutId | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [portDraft, setPortDraft] = useState(String(settings.bridgePort))
+  const [apiKeyDraft, setApiKeyDraft] = useState('')
+  const [hasKeyMap, setHasKeyMap] = useState<Partial<Record<AIProviderId, boolean>>>({})
   const isCustomFont = !FONT_OPTIONS.includes(settings.fontFamily)
 
   useEffect(() => {
     setPortDraft(String(settings.bridgePort))
   }, [settings.bridgePort])
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all(
+      CLOUD_PROVIDERS.map(async (provider) => [provider, await window.api.secretsHasKey(provider)] as const)
+    ).then((entries) => {
+      if (cancelled) return
+      const next: Partial<Record<AIProviderId, boolean>> = {}
+      for (const [provider, present] of entries) {
+        next[provider] = present
+      }
+      setHasKeyMap(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleProviderChange = (nextProvider: AIProviderId): void => {
+    const knownDefaults = new Set(Object.values(DEFAULT_MODELS_BY_PROVIDER))
+    const nextModel =
+      !settings.aiModel.trim() || knownDefaults.has(settings.aiModel.trim())
+        ? DEFAULT_MODELS_BY_PROVIDER[nextProvider]
+        : settings.aiModel
+    setApiKeyDraft('')
+    onChange({ aiProvider: nextProvider, aiModel: nextModel })
+  }
+
+  const handleSaveApiKey = async (): Promise<void> => {
+    const trimmed = apiKeyDraft.trim()
+    if (!trimmed || settings.aiProvider === 'ollama') return
+    try {
+      await window.api.secretsSetKey(settings.aiProvider, trimmed)
+      setApiKeyDraft('')
+      setHasKeyMap((prev) => ({ ...prev, [settings.aiProvider]: true }))
+      showToast(`${settings.aiProvider} API key saved (encrypted).`)
+    } catch (err: unknown) {
+      showToast((err as Error).message || 'Failed to save encrypted API key.')
+    }
+  }
+
+  const handleClearApiKey = async (): Promise<void> => {
+    if (settings.aiProvider === 'ollama') return
+    await window.api.secretsDeleteKey(settings.aiProvider)
+    setApiKeyDraft('')
+    setHasKeyMap((prev) => ({ ...prev, [settings.aiProvider]: false }))
+    showToast(`${settings.aiProvider} API key cleared.`)
+  }
 
   const commitBridgePort = (): void => {
     const parsed = Number.parseInt(portDraft, 10)
@@ -462,6 +531,146 @@ export default function SettingsPanel({
               </button>
             </div>
           </div>
+        </div>
+
+        {/* AI & Speed Engine */}
+        <div className="section">
+          <h2>AI & Speed Engine</h2>
+          <div className="row">
+            <span>Reading mode</span>
+            <select
+              value={settings.readingMode}
+              onChange={(e) => onChange({ readingMode: e.target.value as Settings['readingMode'] })}
+            >
+              <option value="flow">Flow (default)</option>
+              <option value="rsvp">RSVP (speed reader)</option>
+              <option value="bionic">Bionic (prefix bold)</option>
+            </select>
+          </div>
+          <div className="row">
+            <span>RSVP speed: {settings.rsvpWpm} WPM</span>
+            <input
+              type="range"
+              min={150}
+              max={1000}
+              step={25}
+              value={settings.rsvpWpm}
+              onChange={(e) => onChange({ rsvpWpm: Number(e.target.value) })}
+              style={{ width: 120 }}
+            />
+          </div>
+          <div className="row">
+            <span>Bionic strength: {Math.round(settings.bionicStrength * 100)}%</span>
+            <input
+              type="range"
+              min={0.2}
+              max={0.7}
+              step={0.05}
+              value={settings.bionicStrength}
+              onChange={(e) => onChange({ bionicStrength: Number(e.target.value) })}
+              style={{ width: 120 }}
+            />
+          </div>
+
+          <div className="row" style={{ marginTop: 6 }}>
+            <span>AI provider</span>
+            <select
+              value={settings.aiProvider}
+              onChange={(e) => handleProviderChange(e.target.value as AIProviderId)}
+            >
+              <option value="ollama">Ollama (Local)</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="gemini">Gemini</option>
+              <option value="groq">Groq</option>
+            </select>
+          </div>
+
+          <div className="row">
+            <span>Model</span>
+            <input
+              type="text"
+              value={settings.aiModel}
+              onChange={(e) => onChange({ aiModel: e.target.value })}
+              placeholder={DEFAULT_MODELS_BY_PROVIDER[settings.aiProvider]}
+              style={{ width: 145 }}
+            />
+          </div>
+
+          {settings.aiProvider === 'ollama' ? (
+            <div className="row">
+              <span>Ollama URL</span>
+              <input
+                type="text"
+                value={settings.ollamaUrl}
+                onChange={(e) => onChange({ ollamaUrl: e.target.value })}
+                placeholder="http://127.0.0.1:11434"
+                style={{ width: 145 }}
+              />
+            </div>
+          ) : (
+            <div style={{ marginTop: 4 }}>
+              <div className="row" style={{ marginBottom: 4 }}>
+                <span>API key ({settings.aiProvider})</span>
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: hasKeyMap[settings.aiProvider] ? '#81c784' : '#9aa0a6'
+                  }}
+                >
+                  {hasKeyMap[settings.aiProvider] ? 'Saved (encrypted)' : 'Not set'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input
+                  type="password"
+                  value={apiKeyDraft}
+                  onChange={(e) => setApiKeyDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleSaveApiKey()
+                  }}
+                  placeholder={
+                    hasKeyMap[settings.aiProvider] ? 'Enter new key to replace...' : 'Paste API key...'
+                  }
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSaveApiKey()}
+                  disabled={!apiKeyDraft.trim()}
+                  style={{
+                    background: '#2a2d35',
+                    border: 'none',
+                    color: '#e6e8ec',
+                    cursor: apiKeyDraft.trim() ? 'pointer' : 'default',
+                    opacity: apiKeyDraft.trim() ? 1 : 0.45,
+                    borderRadius: 3,
+                    padding: '3px 7px',
+                    fontSize: 11
+                  }}
+                >
+                  Save
+                </button>
+                {hasKeyMap[settings.aiProvider] && (
+                  <button
+                    type="button"
+                    onClick={() => void handleClearApiKey()}
+                    style={{
+                      background: '#3d2224',
+                      border: 'none',
+                      color: '#ffb4b4',
+                      cursor: 'pointer',
+                      borderRadius: 3,
+                      padding: '3px 7px',
+                      fontSize: 11
+                    }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Reading & Auto-scroll */}

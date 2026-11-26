@@ -52,7 +52,9 @@ export async function registerShortcuts(): Promise<ShortcutId[]> {
     toggleScroll: () => sendCommand('toggleScroll'),
     toggleLock: () => sendCommand('toggleLock'),
     back: () => sendCommand('back'),
-    openSettings: () => sendCommand('openSettings')
+    openSettings: () => sendCommand('openSettings'),
+    openPrompt: () => sendCommand('openPrompt'),
+    cycleMode: () => sendCommand('cycleMode')
   }
 
   const conflicts: ShortcutId[] = []

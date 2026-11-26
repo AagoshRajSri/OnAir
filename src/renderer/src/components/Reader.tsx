@@ -1,7 +1,27 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { Settings, Session, ShortcutId } from '../../../shared/types'
 import { splitSentences, findParagraphStart, clampSentenceIndex } from '../lib/sentences'
+import { tokenizeBionic } from '../lib/bionic'
 import { AutoScroller } from '../lib/autoscroll'
+import RsvpView from './RsvpView'
+
+function BionicText({ text, strength }: { text: string; strength: number }): ReactElement {
+  const segments = useMemo(() => tokenizeBionic(text, strength), [text, strength])
+  return (
+    <>
+      {segments.map((seg, idx) =>
+        seg.isWord ? (
+          <span key={idx}>
+            <strong className="bionic-bold">{seg.bold}</strong>
+            <span className="bionic-rest">{seg.rest}</span>
+          </span>
+        ) : (
+          <span key={idx}>{seg.text}</span>
+        )
+      )}
+    </>
+  )
+}
 
 interface ReaderProps {
   text: string
@@ -244,6 +264,20 @@ export default function Reader({
     [settings.fontSize, onSettingsChange]
   )
 
+  if (settings.readingMode === 'rsvp') {
+    return (
+      <RsvpView
+        text={text}
+        sessionId={currentSession?.id ?? null}
+        wpm={settings.rsvpWpm}
+        windowHeight={windowHeight}
+        commandEvent={commandEvent}
+        onWpmChange={(nextWpm) => onSettingsChange({ rsvpWpm: nextWpm })}
+        onWheel={handleWheel}
+      />
+    )
+  }
+
   if (!text) {
     return (
       <div
@@ -257,6 +291,7 @@ export default function Reader({
   }
 
   const showNavBar = sentences.length > 0 && windowHeight >= 72
+  const isBionic = settings.readingMode === 'bionic'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -275,7 +310,16 @@ export default function Reader({
       >
         <div className="reader-content">
           {settings.pageMode ? (
-            <span data-i={clampedIndex}>{sentences[clampedIndex]?.text.trimStart()}</span>
+            <span data-i={clampedIndex}>
+              {isBionic ? (
+                <BionicText
+                  text={sentences[clampedIndex]?.text.trimStart() ?? ''}
+                  strength={settings.bionicStrength}
+                />
+              ) : (
+                sentences[clampedIndex]?.text.trimStart()
+              )}
+            </span>
           ) : (
             sentences.map((seg) => (
               <span
@@ -284,7 +328,11 @@ export default function Reader({
                 className={`sentence-span${clampedIndex === seg.index ? ' active' : ''}`}
                 onClick={() => goToSentence(seg.index)}
               >
-                {seg.text}
+                {isBionic ? (
+                  <BionicText text={seg.text} strength={settings.bionicStrength} />
+                ) : (
+                  seg.text
+                )}
               </span>
             ))
           )}

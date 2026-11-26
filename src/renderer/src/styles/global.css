@@ -103,7 +103,8 @@ body,
   background: rgba(255, 255, 255, 0.1);
 }
 
-.toolbar button.active-lock {
+.toolbar button.active-lock,
+.toolbar button.active-mode {
   opacity: 1;
   background: color-mix(in srgb, var(--text-color) 18%, transparent);
 }
@@ -321,6 +322,7 @@ body,
 }
 
 .settings-panel input[type="text"],
+.settings-panel input[type="password"],
 .settings-panel input[type="number"],
 .settings-panel input[type="color"],
 .settings-panel select {
@@ -382,4 +384,173 @@ body,
   font-size: 14px;
   padding: var(--padding);
 }
+
+/* Bionic mode */
+.bionic-bold {
+  font-weight: 700;
+}
+
+.bionic-rest {
+  opacity: 0.82;
+}
+
+/* RSVP view */
+.rsvp-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: var(--padding);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.rsvp-reticle-guide {
+  width: 2px;
+  height: 12px;
+  background: color-mix(in srgb, var(--text-color) 32%, transparent);
+  margin: 6px 0;
+  flex-shrink: 0;
+}
+
+.rsvp-word-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: baseline;
+  width: 100%;
+  white-space: nowrap;
+  line-height: 1.25;
+}
+
+.rsvp-prefix {
+  justify-self: end;
+  text-align: right;
+  overflow: visible;
+}
+
+.rsvp-orp {
+  color: #ff5252;
+  font-weight: 700;
+  text-align: center;
+  min-width: 1ch;
+  display: inline-block;
+}
+
+.rsvp-suffix {
+  justify-self: start;
+  text-align: left;
+  overflow: visible;
+}
+
+/* Quick-prompt bar (Ctrl+Alt+P) */
+.prompt-bar {
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--bg-color) 88%, var(--text-color) 12%);
+  border-bottom: 1px solid color-mix(in srgb, var(--text-color) 16%, transparent);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.2;
+}
+
+.prompt-bar-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.prompt-bar-input {
+  flex: 1;
+  min-width: 0;
+  background: color-mix(in srgb, var(--bg-color) 70%, #000 30%);
+  color: var(--text-color);
+  border: 1px solid color-mix(in srgb, var(--text-color) 22%, transparent);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+}
+
+.prompt-bar-input:focus {
+  border-color: color-mix(in srgb, var(--text-color) 55%, transparent);
+}
+
+.prompt-bar-btn {
+  background: color-mix(in srgb, var(--text-color) 12%, transparent);
+  color: var(--text-color);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.prompt-bar-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-color) 22%, transparent);
+}
+
+.prompt-bar-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.prompt-bar-btn.stop {
+  background: #8f2929;
+  color: #fff;
+}
+
+.prompt-bar-btn.stop:hover {
+  background: #b03232;
+}
+
+.prompt-bar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.prompt-bar-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.prompt-chip {
+  background: color-mix(in srgb, var(--text-color) 10%, transparent);
+  color: var(--text-color);
+  border: 1px solid color-mix(in srgb, var(--text-color) 14%, transparent);
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.prompt-chip:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-color) 20%, transparent);
+}
+
+.prompt-chip:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.prompt-bar-meta {
+  font-size: 10px;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+
 

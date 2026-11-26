@@ -6,7 +6,12 @@ import type {
   ContentIncomingPayload,
   WindowApplyPayload,
   MetricsMarkPayload,
-  BridgeStatus
+  BridgeStatus,
+  AIProviderId,
+  AIStreamStartPayload,
+  AIStreamChunkPayload,
+  AIStreamDonePayload,
+  AIStreamErrorPayload
 } from '../shared/types'
 import { IPC } from '../shared/types'
 
@@ -55,6 +60,21 @@ contextBridge.exposeInMainWorld('api', {
   bridgeTokenRegenerate: (): Promise<string> =>
     ipcRenderer.invoke(IPC.bridgeTokenRegenerate),
 
+  secretsSetKey: (provider: AIProviderId, apiKey: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.secretsSetKey, provider, apiKey),
+
+  secretsHasKey: (provider: AIProviderId): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.secretsHasKey, provider),
+
+  secretsDeleteKey: (provider: AIProviderId): Promise<void> =>
+    ipcRenderer.invoke(IPC.secretsDeleteKey, provider),
+
+  aiStreamStart: (payload: AIStreamStartPayload): Promise<void> =>
+    ipcRenderer.invoke(IPC.aiStreamStart, payload),
+
+  aiStreamAbort: (streamId?: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.aiStreamAbort, streamId),
+
   // ── Fire-and-forget ──────────────────────────────────────────
   metricsEnabled: (): Promise<boolean> =>
     ipcRenderer.invoke(IPC.metricsEnabled),
@@ -92,6 +112,24 @@ contextBridge.exposeInMainWorld('api', {
     const handler = (_event: Electron.IpcRendererEvent, status: BridgeStatus): void => cb(status)
     ipcRenderer.on(IPC.bridgeStatusUpdated, handler)
     return () => ipcRenderer.off(IPC.bridgeStatusUpdated, handler)
+  },
+
+  onAiStreamChunk: (cb: (payload: AIStreamChunkPayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: AIStreamChunkPayload): void => cb(payload)
+    ipcRenderer.on(IPC.aiStreamChunk, handler)
+    return () => ipcRenderer.off(IPC.aiStreamChunk, handler)
+  },
+
+  onAiStreamDone: (cb: (payload: AIStreamDonePayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: AIStreamDonePayload): void => cb(payload)
+    ipcRenderer.on(IPC.aiStreamDone, handler)
+    return () => ipcRenderer.off(IPC.aiStreamDone, handler)
+  },
+
+  onAiStreamError: (cb: (payload: AIStreamErrorPayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: AIStreamErrorPayload): void => cb(payload)
+    ipcRenderer.on(IPC.aiStreamError, handler)
+    return () => ipcRenderer.off(IPC.aiStreamError, handler)
   },
 
   // ── Utility ──────────────────────────────────────────────────
