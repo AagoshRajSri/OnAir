@@ -439,8 +439,16 @@ export function deliverContentToWindow(
 export function applyWindowSettings(win: BrowserWindow, payload: WindowApplyPayload): void {
   if (win.isDestroyed()) return
 
-  if (payload.hidden) {
-    win.hide()
+  if (payload.hidden !== undefined) {
+    if (payload.hidden) {
+      win.hide()
+    } else {
+      metrics.start('show-window')
+      if (win.isMinimized()) {
+        win.restore()
+      }
+      win.show()
+    }
     return
   }
 

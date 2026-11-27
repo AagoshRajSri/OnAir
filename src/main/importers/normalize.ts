@@ -14,7 +14,7 @@ export function normalizeText(text: string, editMode = false): string {
   let result = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
   // 2. Remove NUL characters
-  result = result.replace(/\x00/g, '')
+  result = result.replaceAll('\0', '')
 
   if (editMode) return result
 

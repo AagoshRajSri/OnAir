@@ -88,7 +88,7 @@ export function extractReadableText(root: Element, ignoreSelectors: readonly str
   return out
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/\x00/g, '')
+    .replaceAll('\0', '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()

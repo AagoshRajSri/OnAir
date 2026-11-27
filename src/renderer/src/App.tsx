@@ -87,7 +87,7 @@ function normalizeDropText(text: string): string {
   return text
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
-    .replace(/\x00/g, '')
+    .replaceAll('\0', '')
     .replace(/[ \t]+$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
@@ -872,7 +872,7 @@ export default function App(): ReactElement {
 
   const handleLiveEditChange = useCallback((rawText: string): void => {
     // Edit-mode sync applies steps 1 and 2 (line endings + NUL) per §6.5 cleanly without cursor jump
-    const normalized = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\x00/g, '')
+    const normalized = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replaceAll('\0', '')
     const current = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
 
     let updated: Session

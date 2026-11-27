@@ -47,18 +47,22 @@ All installed package versions are recorded here per the build spec.
 
 ## Extra Package Rationale
 
-- **Phase 1**: All packages above (except Phase 2 additions) are required by the Phase 1 Build Spec §1.2.
-- **Phase 2**: Added `ws` (`8.23.0`) and `@types/ws` (`8.18.2`) — Localhost WebSocket bridge for Phase 2 browser extension.
+- **Phase 1**: All packages above (except Phase 2 additions) are required by the Phase 1 Build Spec §1.2 (`eslint.config.mjs` wires `@electron-toolkit/eslint-config-ts`, `@electron-toolkit/eslint-config-prettier`, and `eslint-plugin-react-hooks` for ESLint v9 flat config).
+- **Phase 2**: Added `ws` (`8.23.0`) and `@types/ws` (`8.18.2`) — Localhost WebSocket bridge for Phase 2 Chrome extension (`extension/build.mjs` bundles MV3 with esbuild already included via Vite).
+- **Phase 3**: Zero new runtime or dev packages — Speed Engine (RSVP/Bionic), SSE/Ollama streaming (`fetch`), and DPAPI encryption (`safeStorage`) use built-in Electron/Node primitives.
 
 ## Milestone Log
 
 | Milestone | Status | Date |
 |-----------|--------|------|
-| M1 Scaffold | ✅ done | 2026-11-25 |
-| M2 Reader Window | 🔄 in progress | — |
-| M3 Text Rendering & Themes | pending | — |
-| M4 Input | pending | — |
-| M5 File Import | pending | — |
-| M6 Navigation & Sessions | pending | — |
-| M7 Package & Verify | pending | — |
+| M1 Scaffold (`ad77b64`) | ✅ done | 2026-11-25 |
+| M2 Reader Window | ✅ done | 2026-11-26 |
+| M3 Text Rendering & Themes | ✅ done | 2026-11-26 |
+| M4 Input & Clipboard | ✅ done | 2026-11-26 |
+| M5 File Import & Normalization | ✅ done | 2026-11-26 |
+| M6 Navigation & Sessions | ✅ done | 2026-11-26 |
+| M7 Package & Verify (`3d52d78`, `e319242`) | ✅ done | 2026-11-26 |
+| Phase 2 Localhost Bridge & Chrome Extension (`d31ec55`, `00ac56d`) | ✅ done | 2026-11-27 |
+| Phase 3 Speed Engine & Streaming AI (`b2b0e7d`) | ✅ done | 2026-11-27 |
+| Strict Sign-Off Hygiene & Full §9 Benchmarks (`eslint`, `PDFDocumentProxy`, 87 tests) | ✅ done | 2026-11-27 |
 

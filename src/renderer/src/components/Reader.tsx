@@ -88,16 +88,21 @@ export default function Reader({
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  const currentKey = currentSession
+    ? `${currentSession.id}:${currentSession.createdAt}:${currentSession.bridgeMessageId ?? ''}`
+    : ''
+  const initialSentenceIndexRef = useRef(0)
+  initialSentenceIndexRef.current = currentSession?.sentenceIndex ?? 0
+
   // Initialize sentence index on session switch or in-place tab replacement; clamp on streaming updates
   useEffect(() => {
-    const currentKey = currentSession
-      ? `${currentSession.id}:${currentSession.createdAt}:${currentSession.bridgeMessageId ?? ''}`
-      : ''
     const maxIdx = Math.max(0, sentences.length - 1)
 
     if (prevSessionKeyRef.current !== currentKey) {
       prevSessionKeyRef.current = currentKey
-      const initial = currentSession ? Math.max(0, Math.min(currentSession.sentenceIndex, maxIdx)) : 0
+      const initial = currentKey
+        ? Math.max(0, Math.min(initialSentenceIndexRef.current, maxIdx))
+        : 0
       sentenceIndexRef.current = initial
       setSentenceIndex(initial)
       savedScrollTopRef.current = 0
@@ -113,13 +118,10 @@ export default function Reader({
       sentenceIndexRef.current = next
       return next
     })
-  }, [currentSession?.id, currentSession?.createdAt, currentSession?.bridgeMessageId, sentences.length])
+  }, [currentKey, sentences.length])
 
   // Preserve scrollTop on streaming updates; scroll active sentence on navigation or mode/session switch
   useLayoutEffect(() => {
-    const currentKey = currentSession
-      ? `${currentSession.id}:${currentSession.createdAt}:${currentSession.bridgeMessageId ?? ''}`
-      : ''
     const prev = prevScrollAnchorRef.current
     const textChangedInPlace =
       prev.sessionKey === currentKey &&
@@ -152,7 +154,7 @@ export default function Reader({
 
     const el = containerRef.current?.querySelector(`[data-i="${clampedIndex}"]`)
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [clampedIndex, currentSession?.id, currentSession?.createdAt, currentSession?.bridgeMessageId, sentences.length, settings.pageMode, text])
+  }, [clampedIndex, currentKey, sentences.length, settings.pageMode, text])
 
   const goToSentence = useCallback(
     (next: number) => {
@@ -238,7 +240,8 @@ export default function Reader({
 
   // Cleanup autoscroller RAF on unmount
   useEffect(() => {
-    return () => scrollerRef.current.stop()
+    const scroller = scrollerRef.current
+    return () => scroller.stop()
   }, [])
 
   // Stop scrolling automatically if switched to RSVP, Page mode, or cleared text;

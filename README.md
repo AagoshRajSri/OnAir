@@ -7,17 +7,17 @@
 ## Features
 
 ### Floating Frameless Reader (Phase 1)
-- **Always on top**: Runs at `screen-saver` level so it stays visible while reading and researching.
-- **Non-transparent solid surface**: Ensures smooth Windows OS native resizing down to the minimum floor without GPU compositing lag.
-- **Drag & position controls**: 12 px top drag strip with dedicated position locking (`Ctrl+L` / toolbar toggle).
-- **Auto-hiding toolbar**: 28 px auto-hiding toolbar on hover (revealed when window height ≥ 100 px).
-- **Native Windows context menu**: Standard right-click menu with Cut, Copy, Paste, and Reading actions.
-- **Window size presets**: Column (360×640), Compact (400×400), Wide (900×360).
-- **State persistence**: Remembers window position and dimensions across restarts with multi-monitor disconnected safety fallbacks.
+- **Always on top**: Runs at `screen-saver` level so it stays visible during presentations and screen shares (`setContentProtection` is never used).
+- **Frameless transparent window**: Supports DPI-aware custom 8-edge/corner resizing (down to `180×110` including the bottom-left exterior drag gutter) and compositor alpha opacity (`--win-opacity`).
+- **Drag & lock controls**: Dedicated 10 px top drag strip + exterior circular drag handle, with position Lock (`Ctrl+Alt+L`) pinning always-on-top while keeping drag and resize active.
+- **Configurable toolbar**: 32 px toolbar supporting `Hover`, `Always`, and `Minimal` visibility modes (auto-collapsed below `100 px` height).
+- **Native Windows context menu**: Right-click menu with Cut, Copy, Paste, Select All, File/Clipboard import, Page mode, Lock, Hide, Settings, and Quit.
+- **Window size presets**: Column (398×678), Compact (438×438), Wide (938×398), and Stage (1280×720).
+- **State persistence**: Remembers window position and dimensions across restarts with disconnected multi-monitor overlap recovery.
 
 ### Typography & High-Contrast Themes
 - **Zero re-render styling**: High-performance CSS custom properties power instant theme and font changes without DOM thrashing.
-- **Customizable typography**: Font size (8–200 px), weight (400/700), line height (1.0–3.0), letter spacing (-2–10 px), padding (0–64 px), and text alignment.
+- **Customizable typography**: Font size (8–200 px), weight (100–900), line height (1.0–3.0), letter spacing (-2–10 px), padding (0–80 px), text shadow/glow, optional max readable column width, reading guide band, and X/Y beam-splitter mirroring.
 - **System & custom fonts**: Segoe UI, Arial, Calibri, Cambria, Consolas, Georgia, Times New Roman, Verdana, or any locally installed font.
 - **Direct font scaling**: `Ctrl + Mouse Wheel` increments or decrements font size by 2 px per notch.
 - **6 WCAG AAA high-contrast presets** (> 11:1 contrast ratio):
@@ -27,21 +27,15 @@
   - **Warm Charcoal** (soft sepia dark)
   - **OLED Black** (pure black, > 18:1 contrast)
   - **Slate** (cool graphite)
-  - Plus full user **Custom** foreground and background colors.
+  - Plus full user **Custom** foreground/background and chrome accent/surface colors.
 
-### Reading & Sentence Navigation
-- **Intl.Segmenter sentence engine**: Splits text into numbered sentence spans (`<span data-i="n">`).
-- **Active focus highlighting**: Currently active sentence is highlighted with 15% text color background tint and kept centered via auto-scrolling.
-- **Keyboard navigation**:
-  - `↑` / `↓` / `←` / `→`: Navigate sentence-by-sentence or jump paragraphs.
-  - `Home` / `End`: Jump to document beginning or end.
-  - `Space`: Toggle continuous auto-scroll.
-  - `[` / `]`: Adjust auto-scroll speed.
-- **Continuous auto-scrolling**: `requestAnimationFrame`-driven smooth scrolling (10–400 px/s, default 60 px/s) with manual scroll interception and end-of-text notification.
-- **Page mode**: Optional statement-by-statement presentation mode for focused, distraction-free reading.
+### Reading, Tabs & Navigation
+- **Multi-tab answer workspace**: Each imported document or mirrored answer can open in its own tab (`Ctrl+Alt+V`, file import, or OnAir Bridge); optional **Open last pasted item on startup** setting (default launches a clean blank `New tab`).
+- **Prev/Next navigation**: Step between previous/next answers via the bottom navigation arrows (`←` / `→`), or toggle **Page-by-page view** (`Intl.Segmenter` sentence spans `<span data-i="n">` with `15%` highlight tint).
+- **Continuous auto-scrolling**: `requestAnimationFrame`-driven smooth scrolling (`10–400 px/s`, default `60 px/s`) with manual scroll interception, hover pause, optional loop, and end-of-text banner.
 
-### Input, Clipboard & File Importers
-- **In-place edit mode**: Edit text directly with `Ctrl+E`, save with `Ctrl+Enter`, or discard with `Esc`.
+### Input, Live Editing & File Importers
+- **Live dynamic edit mode**: Toggle inline editing (`Ctrl+E` or toolbar **Edit**) with live auto-save across tab switches, **Revert** snapshot recovery, and `Ctrl+Enter` / `Esc` exit.
 - **Global clipboard hotkey**: `Ctrl+Alt+V` instantly imports clipboard content into a new session.
 - **Clipboard watcher**: Optional 500 ms polling watcher with visual indicator dot on the drag strip.
 - **Drag-and-drop import**: Drop plain text or supported document files straight onto the window.
@@ -119,10 +113,13 @@
 # Start desktop app in development mode
 npm run dev
 
+# Run ESLint across renderer, main, and preload sources
+npm run lint
+
 # Run TypeScript type check across all targets (app, node, extension)
 npm run typecheck
 
-# Run full Vitest test suite (82 tests)
+# Run full Vitest test suite (87 tests)
 npm test
 
 # Build production bundles
@@ -147,17 +144,29 @@ Then in Chrome:
 
 ## Benchmarks & Performance Reports
 
-### 1. Clipboard Transfer Performance (Phase 1)
-Measured end-to-end latency from global clipboard hotkey activation (`Ctrl + Alt + V`) to double-`requestAnimationFrame` content rendering in the Electron window.
+### 1. Phase 1 §9 Latency, Smoothness & Memory Protocol (Installed Build)
+Measured directly on the installed NSIS build (`%LOCALAPPDATA%\Programs\OnAir\OnAir.exe`, Electron `45.5.0`) via `scripts/verify-phase1-s9.mjs` with `FR_METRICS=1` (`33` trials per latency metric with first `3` warm-up trials discarded $\rightarrow$ `30` measured trials). `clipboard-transfer` reads from real Windows clipboard population and `show-window` toggles visibility through the main-process window handler via CDP.
 
-| Metric | Result |
-|---|---:|
-| Number of trials | 226 |
-| **Median latency** | **14.445 ms** |
-| Average latency | 14.474 ms |
-| P95 latency | 24.333 ms |
-| Minimum latency | 2.689 ms |
-| Maximum latency | 38.611 ms |
+**Test Host & Environment:**
+- **CPU**: `13th Gen Intel(R) Core(TM) i7-1360P` (12 cores / 16 logical processors, 2200 MHz max clock)
+- **RAM**: `15.65 GB`
+- **GPU**: `Intel(R) Iris(R) Xe Graphics` (`Parsec Virtual Display Adapter` also present)
+- **OS**: `Microsoft Windows 11 Home Single Language` (`10.0.26300`, Build `26300`, 64-bit)
+- **Primary Display**: `1536×864` logical (`125%` DPI scaling / `1920×1080` physical)
+
+| Metric | Workload | Measured Trials | Median | P95 | Min / Max | Spec Target |
+|---|---|---:|---:|---:|---:|---|
+| `show-window` | Hide $\rightarrow$ Show (`win.show()`) | 30 | **2.439 ms** | **4.751 ms** | 1.289 / 6.154 ms | Median `< 300 ms` |
+| `clipboard-transfer` | ~1,000 chars | 30 | **26.880 ms** | **33.884 ms** | 1.732 / 34.589 ms | Median `< 200 ms` |
+| `clipboard-transfer` | ~50,000 chars | 30 | **20.625 ms** | **31.611 ms** | 6.213 / 32.186 ms | Median `< 200 ms` |
+| `content-display` | ~1,000 chars | 30 | **26.450 ms** | **33.400 ms** | 1.500 / 34.000 ms | Median `< 100 ms` |
+| `content-display` | ~50,000 chars | 30 | **19.750 ms** | **30.800 ms** | 5.600 / 31.600 ms | Median `< 100 ms` |
+| `theme-switch` | Theme swatch (~50k chars) | 30 | **26.950 ms** | **32.500 ms** | 18.600 / 32.700 ms | Median `< 100 ms` |
+| `session-switch` | ~100,000 chars | 30 | **22.950 ms** | **31.200 ms** | 19.000 / 34.600 ms | Median `< 300 ms` |
+| `Smoothness` | 10 s auto-scroll @ speed `200` | 10 s run | **60.117 FPS** avg | **0.0%** > 33 ms | — | $\ge$ 55 FPS, $\le$ 1% > 33 ms |
+| `Idle memory` | 60 s idle, 4 processes (no flags) | 4 procs | **108 MB** *(Task Mgr)* | — | 196.96 MB private commit / 360.29 MB total WS | Proposed `< 250 MB` |
+
+*(Task Manager's `Memory` metric sums `WorkingSetPrivate` across all 4 `OnAir.exe` processes without double-counting shared Chromium binaries.)*
 
 ---
 
@@ -197,17 +206,17 @@ Measured directly on the packaged Electron build (`dist/win-unpacked/OnAir.exe`)
 
 ## Test Coverage Summary
 
-OnAir maintains **82 automated tests across 12 test suites** (100% passing):
+OnAir maintains **87 automated tests across 12 test suites** (100% passing):
 
 1. **`tests/normalize.test.ts`** (10 tests): CRLF/CR normalization, NUL stripping, trailing whitespace trimming, newline collapsing, edit mode constraints.
 2. **`tests/storage.test.ts`** (8 tests): Session history pruning, 7-day retention limit, 20-session cap, sort order integrity, default settings.
 3. **`tests/themes.test.ts`** (4 tests): WCAG AAA contrast ratio mathematical verification for all presets (Obsidian, Slate, OLED Black $\ge 18:1$).
-4. **`tests/metrics.test.ts`** (3 tests): Trial counter persistence across restarts, metric file parsing, disabled state handling.
+4. **`tests/metrics.test.ts`** (4 tests): Trial counter persistence across restarts, metric file parsing, disabled state handling, Phase 3 local vs AI metric recording.
 5. **`tests/sentences.test.ts`** (11 tests): `Intl.Segmenter` splitting, paragraph indexing, directional paragraph navigation, sentence clamping on text shrinkage.
 6. **`tests/bridge.test.ts`** (6 tests): Port & token generation, timing-safe auth, close code 1008 rejection cases, seq ordering, ping/pong, EADDRINUSE resilience.
 7. **`tests/importers.test.ts`** (8 tests): UTF-8 BOM, Windows-1252, selectable PDF extraction, scanned PDF detection, DOCX extraction, oversized file rejection (>10 MB).
-8. **`extension/tests/providers.test.ts`** (10 tests): ChatGPT & Claude DOM adapters against HTML fixtures, streaming indicator detection, 50 ms leading/trailing throttle controller, 1500 ms idle finalization fallback.
+8. **`extension/tests/providers.test.ts`** (13 tests): ChatGPT & Claude DOM adapters against HTML fixtures, streaming indicator detection, 50 ms leading/trailing throttle controller, 1500 ms idle finalization fallback, `syncNow()` & re-enable `seq` monotonic emission.
 9. **`tests/secrets.test.ts`** (6 tests): Phase 3 default contracts, DPAPI `safeStorage` round-trip, zero plaintext on disk (`secrets.enc`), unavailability refusal, multi-provider deletion.
 10. **`tests/rsvp.test.ts`** (5 tests): ORP index buckets (`1..14+`), punctuation-aware lossless splitting, pause multipliers (`1.5×`, `2.2×`, `2.8×`), 300 WPM timing accuracy (50 words in 10 s).
 11. **`tests/bionic.test.ts`** (4 tests): Prefix length calculation, strength clamping, lossless reconstruction across newlines/punctuation.
-12. **`tests/sse-parser.test.ts`** (7 tests): Split multi-byte UTF-8 / TCP chunk boundaries, `[DONE]` & provider SSE/NDJSON parsers, 16 ms coalescing, HTTP 401/429 error toasts, mid-stream `AbortController` cancellation, localhost-only Ollama URL validation.
+12. **`tests/sse-parser.test.ts`** (8 tests): Split multi-byte UTF-8 / TCP chunk boundaries, `[DONE]` & provider SSE/NDJSON parsers, 16 ms coalescing, HTTP 401/429 error toasts, mid-stream `AbortController` cancellation, localhost-only Ollama URL validation.

@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs'
 import { BrowserWindow } from 'electron'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { IPC } from '../../shared/types'
 import { normalizeText } from './normalize'
 
@@ -8,7 +9,7 @@ export async function importPdf(filePath: string, win: BrowserWindow): Promise<s
   const buffer = await fs.readFile(filePath)
   const data = new Uint8Array(buffer)
 
-  let pdfDoc: any
+  let pdfDoc: PDFDocumentProxy
   try {
     const loadingTask = pdfjs.getDocument({
       data,

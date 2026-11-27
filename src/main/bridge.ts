@@ -332,7 +332,7 @@ export class BridgeServer {
       }
     }
 
-    const cleanText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\x00/g, '')
+    const cleanText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replaceAll('\0', '')
     this.hooks.onContent({
       text: cleanText,
       source: 'bridge',
