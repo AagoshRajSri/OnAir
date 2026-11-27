@@ -1,4 +1,4 @@
-# OnAir — Floating Reader Companion
+# OnAir - Floating Reader Companion
 
 **OnAir** is a lightweight Windows desktop companion that displays any text in a floating, freely resizable, always-on-top window with Word-style reading controls, instant clipboard transfer, and a secure local WebSocket bridge for live browser streaming.
 
