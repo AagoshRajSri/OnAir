@@ -158,15 +158,15 @@ Measured directly on the installed NSIS build (`%LOCALAPPDATA%\Programs\OnAir\On
 
 | Metric | Workload | Measured Trials | Median | P95 | Min / Max | Spec Target |
 |---|---|---:|---:|---:|---:|---|
-| `show-window` | Hide $\rightarrow$ Show (`win.show()`) | 30 | **2.439 ms** | **4.751 ms** | 1.289 / 6.154 ms | Median `< 300 ms` |
-| `clipboard-transfer` | ~1,000 chars | 30 | **26.880 ms** | **33.884 ms** | 1.732 / 34.589 ms | Median `< 200 ms` |
-| `clipboard-transfer` | ~50,000 chars | 30 | **20.625 ms** | **31.611 ms** | 6.213 / 32.186 ms | Median `< 200 ms` |
-| `content-display` | ~1,000 chars | 30 | **26.450 ms** | **33.400 ms** | 1.500 / 34.000 ms | Median `< 100 ms` |
-| `content-display` | ~50,000 chars | 30 | **19.750 ms** | **30.800 ms** | 5.600 / 31.600 ms | Median `< 100 ms` |
-| `theme-switch` | Theme swatch (~50k chars) | 30 | **26.950 ms** | **32.500 ms** | 18.600 / 32.700 ms | Median `< 100 ms` |
-| `session-switch` | ~100,000 chars | 30 | **22.950 ms** | **31.200 ms** | 19.000 / 34.600 ms | Median `< 300 ms` |
-| `Smoothness` | 10 s auto-scroll @ speed `200` | 10 s run | **60.117 FPS** avg | **0.0%** > 33 ms | — | $\ge$ 55 FPS, $\le$ 1% > 33 ms |
-| `Idle memory` | 60 s idle, 4 processes (no flags) | 4 procs | **108 MB** *(Task Mgr)* | — | 196.96 MB private commit / 360.29 MB total WS | Proposed `< 250 MB` |
+| `show-window` | Hide $\rightarrow$ Show (`win.show()`) | 30 | **4.374 ms** | **5.770 ms** | 2.239 / 7.446 ms | Median `< 300 ms` |
+| `clipboard-transfer` | ~1,000 chars | 30 | **21.628 ms** | **32.018 ms** | 6.358 / 32.223 ms | Median `< 200 ms` |
+| `clipboard-transfer` | ~50,000 chars | 30 | **21.305 ms** | **30.440 ms** | 14.216 / 37.783 ms | Median `< 200 ms` |
+| `content-display` | ~1,000 chars | 30 | **20.900 ms** | **31.200 ms** | 5.800 / 31.700 ms | Median `< 100 ms` |
+| `content-display` | ~50,000 chars | 30 | **19.650 ms** | **28.600 ms** | 12.500 / 35.500 ms | Median `< 100 ms` |
+| `theme-switch` | Theme swatch (~50k chars) | 30 | **24.550 ms** | **29.800 ms** | 20.400 / 32.300 ms | Median `< 100 ms` |
+| `session-switch` | ~100,000 chars | 30 | **29.650 ms** | **35.400 ms** | 18.900 / 36.300 ms | Median `< 300 ms` |
+| `Smoothness` | 10 s auto-scroll @ speed `200` | 10 s run | **60.141 FPS** avg | **0.0%** > 33 ms | — | $\ge$ 55 FPS, $\le$ 1% > 33 ms |
+| `Idle memory` | 60 s idle, 4 processes (no flags) | 4 procs | **108.94 MB** *(Task Mgr)* | — | 197.57 MB private commit / 390.34 MB total WS | Proposed `< 250 MB` |
 
 *(Task Manager's `Memory` metric sums `WorkingSetPrivate` across all 4 `OnAir.exe` processes without double-counting shared Chromium binaries. Note on measurement path: synthetic `WM_HOTKEY` global keystrokes are isolated in non-interactive Windows shells, so `scripts/verify-phase1-s9.mjs` invokes `window.api.windowApply({ hidden })` and `window.api.clipboardImport()` over CDP after real Windows clipboard updates; this bypasses OS `WM_HOTKEY` queue dispatch before `metrics.start()` and converges on the identical `win.show()` -> `win.on('show')` and `importFromClipboard()` -> double-`rAF` pipelines.)*
 
