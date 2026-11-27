@@ -15,9 +15,11 @@
 - **Window size presets**: Column (398×678), Compact (438×438), Wide (938×398), and Stage (1280×720).
 - **State persistence**: Remembers window position and dimensions across restarts with disconnected multi-monitor overlap recovery.
 
-### Typography & High-Contrast Themes
+### Typography, Optics & High-Contrast Themes
 - **Zero re-render styling**: High-performance CSS custom properties power instant theme and font changes without DOM thrashing.
-- **Customizable typography**: Font size (8–200 px), weight (100–900), line height (1.0–3.0), letter spacing (-2–10 px), padding (0–80 px), text shadow/glow, optional max readable column width, reading guide band, and X/Y beam-splitter mirroring.
+- **Vision-science responsive optics (`responsiveScale`)**: `ResizeObserver` dynamically adapts stage typography, measure-based leading, and dark-polarity halation micro-tracking to fill ultra-wide bars while preserving $\ge 3$ readable lines vertically and scaling cleanly into compact narrow panes.
+- **Optical teleprompter visibility**: Upper-third (`39%`) camera-aligned focus band (`Focus` toggle + directional ticks), overflow-aware peripheral scroll fade (`edgeFade`), smart soft-wrap reflow for PDFs/copied prose (`Reflow`), edge-to-edge progress track, and speech time-remaining telemetry HUD.
+- **Customizable typography**: Font size (8–200 px), weight (100–900), line height (1.0–3.0), letter spacing (-2–10 px), padding (0–80 px), text shadow/glow, optional max readable column width, and X/Y beam-splitter mirroring.
 - **System & custom fonts**: Segoe UI, Arial, Calibri, Cambria, Consolas, Georgia, Times New Roman, Verdana, or any locally installed font.
 - **Direct font scaling**: `Ctrl + Mouse Wheel` increments or decrements font size by 2 px per notch.
 - **6 WCAG AAA high-contrast presets** (> 11:1 contrast ratio):
@@ -119,7 +121,7 @@ npm run lint
 # Run TypeScript type check across all targets (app, node, extension)
 npm run typecheck
 
-# Run full Vitest test suite (87 tests)
+# Run full Vitest test suite (94 tests)
 npm test
 
 # Build production bundles
@@ -166,7 +168,7 @@ Measured directly on the installed NSIS build (`%LOCALAPPDATA%\Programs\OnAir\On
 | `Smoothness` | 10 s auto-scroll @ speed `200` | 10 s run | **60.117 FPS** avg | **0.0%** > 33 ms | — | $\ge$ 55 FPS, $\le$ 1% > 33 ms |
 | `Idle memory` | 60 s idle, 4 processes (no flags) | 4 procs | **108 MB** *(Task Mgr)* | — | 196.96 MB private commit / 360.29 MB total WS | Proposed `< 250 MB` |
 
-*(Task Manager's `Memory` metric sums `WorkingSetPrivate` across all 4 `OnAir.exe` processes without double-counting shared Chromium binaries.)*
+*(Task Manager's `Memory` metric sums `WorkingSetPrivate` across all 4 `OnAir.exe` processes without double-counting shared Chromium binaries. Note on measurement path: synthetic `WM_HOTKEY` global keystrokes are isolated in non-interactive Windows shells, so `scripts/verify-phase1-s9.mjs` invokes `window.api.windowApply({ hidden })` and `window.api.clipboardImport()` over CDP after real Windows clipboard updates; this bypasses OS `WM_HOTKEY` queue dispatch before `metrics.start()` and converges on the identical `win.show()` -> `win.on('show')` and `importFromClipboard()` -> double-`rAF` pipelines.)*
 
 ---
 
@@ -206,7 +208,7 @@ Measured directly on the packaged Electron build (`dist/win-unpacked/OnAir.exe`)
 
 ## Test Coverage Summary
 
-OnAir maintains **87 automated tests across 12 test suites** (100% passing):
+OnAir maintains **94 automated tests across 13 test suites** (100% passing):
 
 1. **`tests/normalize.test.ts`** (10 tests): CRLF/CR normalization, NUL stripping, trailing whitespace trimming, newline collapsing, edit mode constraints.
 2. **`tests/storage.test.ts`** (8 tests): Session history pruning, 7-day retention limit, 20-session cap, sort order integrity, default settings.
@@ -220,3 +222,4 @@ OnAir maintains **87 automated tests across 12 test suites** (100% passing):
 10. **`tests/rsvp.test.ts`** (5 tests): ORP index buckets (`1..14+`), punctuation-aware lossless splitting, pause multipliers (`1.5×`, `2.2×`, `2.8×`), 300 WPM timing accuracy (50 words in 10 s).
 11. **`tests/bionic.test.ts`** (4 tests): Prefix length calculation, strength clamping, lossless reconstruction across newlines/punctuation.
 12. **`tests/sse-parser.test.ts`** (8 tests): Split multi-byte UTF-8 / TCP chunk boundaries, `[DONE]` & provider SSE/NDJSON parsers, 16 ms coalescing, HTTP 401/429 error toasts, mid-stream `AbortController` cancellation, localhost-only Ollama URL validation.
+13. **`tests/optics-reflow.test.ts`** (7 tests): Smart PDF/copy soft-wrap recovery (`reflowWrappedText`), heading & `Key: Value` preservation, speech duration telemetry, viewport-responsive optical font scaling (`computeStageOptics`), dark-polarity tracking, and dynamic RSVP sizing.

@@ -503,6 +503,12 @@ export default function SettingsPanel({
 
       {/* ── Layout & Display ── */}
       <p className="sp-section-title">Stage &amp; Optics</p>
+      <Row
+        label="Responsive stage scaling"
+        hint="Dynamically enlarges text on wide screens while keeping >= 3 vertical lines, and scales cleanly down in compact panes."
+      >
+        <Toggle checked={settings.responsiveScale} onChange={(v) => onChange({ responsiveScale: v })} />
+      </Row>
       <Row label="Column width" hint="Constrains reading width on wide screens. 0 = full width.">
         <select
           className="sp-select"
@@ -607,8 +613,14 @@ export default function SettingsPanel({
       <Row label="Page-by-page view" hint="One sentence per screen. Use ← → to navigate.">
         <Toggle checked={settings.pageMode} onChange={(v) => onChange({ pageMode: v })} />
       </Row>
-      <Row label="Reading guide band" hint="Highlights your eye-line across the stage in Flow and Bionic modes.">
+      <Row label="Reading guide band" hint="Highlights your camera-aligned eye-line across the stage in Flow and Bionic modes.">
         <Toggle checked={settings.readingGuide} onChange={(v) => onChange({ readingGuide: v })} />
+      </Row>
+      <Row label="Peripheral edge fade" hint="Softens overflowing top/bottom boundaries to reduce visual crowding.">
+        <Toggle checked={settings.edgeFade} onChange={(v) => onChange({ edgeFade: v })} />
+      </Row>
+      <Row label="Smart PDF / copy reflow" hint="Unwraps broken mid-clause line breaks while preserving headings, bullets, and Key: Value rows.">
+        <Toggle checked={settings.smartReflow} onChange={(v) => onChange({ smartReflow: v })} />
       </Row>
 
       <p className="sp-section-title">RSVP</p>

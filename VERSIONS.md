@@ -66,3 +66,6 @@ All installed package versions are recorded here per the build spec.
 | Phase 3 Speed Engine & Streaming AI (`b2b0e7d`) | ✅ done | 2026-11-27 |
 | Strict Sign-Off Hygiene & Full §9 Benchmarks (`eslint`, `PDFDocumentProxy`, 87 tests) | ✅ done | 2026-11-27 |
 
+### §9 Benchmark Harness Note
+See the **Benchmarks & Performance Reports** table in `README.md` and the header comment in `scripts/verify-phase1-s9.mjs`. When re-running §9 across machines or Electron upgrades, note that `verify-phase1-s9.mjs` drives `window.api.windowApply({ hidden })` and `window.api.clipboardImport()` over CDP rather than injecting synthetic Win32 `WM_HOTKEY` chords (blocked across non-interactive shell isolation); pre-`metrics.start()` IPC entry differs slightly from global hotkey dispatch, after which execution converges on the identical `win.show()` -> `win.on('show')` and `importFromClipboard()` -> double-`rAF` paths.
+

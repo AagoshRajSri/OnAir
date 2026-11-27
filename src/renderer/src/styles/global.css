@@ -390,7 +390,7 @@ body,
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: 148px;
+  max-width: clamp(110px, 24vw, 280px);
   height: 20px;
   padding: 0 6px 0 8px;
   border-radius: var(--ui-radius-sm);
@@ -579,14 +579,40 @@ body,
   position: absolute;
   left: 0;
   right: 0;
-  top: 42%;
-  height: calc(var(--font-size) * var(--line-height) * 1.45);
+  top: 39%;
+  height: calc(var(--stage-font-size, var(--font-size)) * var(--stage-line-height, var(--line-height)) * 1.24);
   transform: translateY(-50%);
-  border-top: 1px solid color-mix(in srgb, var(--ui-accent) 28%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--ui-accent) 28%, transparent);
-  background: color-mix(in srgb, var(--text-color) 4%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--ui-accent) 32%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--ui-accent) 32%, transparent);
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--ui-accent) 7%, transparent) 0%,
+    color-mix(in srgb, var(--text-color) 4%, transparent) 12%,
+    color-mix(in srgb, var(--text-color) 4%, transparent) 88%,
+    color-mix(in srgb, var(--ui-accent) 7%, transparent) 100%
+  );
   pointer-events: none;
   z-index: 5;
+}
+
+.reading-guide-tick {
+  position: absolute;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: translateY(-50%);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+.reading-guide-tick.left {
+  left: 4px;
+  border-left: 5px solid color-mix(in srgb, var(--ui-accent) 75%, transparent);
+}
+
+.reading-guide-tick.right {
+  right: 4px;
+  border-right: 5px solid color-mix(in srgb, var(--ui-accent) 75%, transparent);
 }
 
 .reader-container {
@@ -595,6 +621,37 @@ body,
   padding: var(--padding);
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.reader-container.teleprompter-stage {
+  padding: var(--stage-pad-y, var(--padding)) var(--stage-pad-x, var(--padding));
+}
+
+.reader-container.fade-top {
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.24) 0%, #000 16%, #000 100%);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.24) 0%, #000 16%, #000 100%);
+}
+
+.reader-container.fade-bottom {
+  mask-image: linear-gradient(to bottom, #000 0%, #000 82%, rgba(0, 0, 0, 0.24) 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 82%, rgba(0, 0, 0, 0.24) 100%);
+}
+
+.reader-container.fade-top.fade-bottom {
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.24) 0%,
+    #000 16%,
+    #000 82%,
+    rgba(0, 0, 0, 0.24) 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.24) 0%,
+    #000 16%,
+    #000 82%,
+    rgba(0, 0, 0, 0.24) 100%
+  );
 }
 
 .reader-container.scrollbar-hidden {
@@ -635,6 +692,13 @@ body,
   user-select: text;
 }
 
+.teleprompter-stage .reader-content {
+  font-size: var(--stage-font-size, var(--font-size));
+  line-height: var(--stage-line-height, var(--line-height));
+  letter-spacing: var(--stage-letter-spacing, var(--letter-spacing));
+  text-wrap: pretty;
+}
+
 input,
 textarea {
   user-select: text;
@@ -647,6 +711,7 @@ textarea {
 
 /* ─── Bottom navigation bar ───────────────────────────────────────────────── */
 .reader-nav-bar {
+  position: relative;
   -webkit-app-region: no-drag;
   height: var(--ui-nav-h);
   flex-shrink: 0;
@@ -665,6 +730,25 @@ textarea {
   user-select: none;
 }
 
+.reader-progress-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.reader-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--ui-accent), var(--ui-blue));
+  opacity: 0.72;
+  transition: width 90ms linear;
+}
+
 .reader-nav-left,
 .reader-nav-right {
   display: flex;
@@ -675,14 +759,56 @@ textarea {
 
 .reader-nav-right {
   justify-content: flex-end;
+  gap: 6px;
 }
 
 .reader-nav-center {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   flex: 0 0 auto;
   padding: 0 8px;
+}
+
+.reader-hud-meta {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-text-muted);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.reader-hud-chip {
+  font-family: var(--ui-font-mono);
+  font-size: 9.5px;
+  color: var(--ui-text-dim);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.reader-nav-btn.reader-hud-toggle {
+  font-size: 10px;
+  padding: 2px 7px;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text-dim);
+}
+
+.reader-nav-btn.reader-hud-toggle.active {
+  color: var(--ui-accent);
+  border-color: var(--ui-accent-dim);
+  background: var(--ui-accent-dim);
+}
+
+.reader-speed-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  border-left: 1px solid var(--ui-border);
+  padding-left: 6px;
 }
 
 .reader-nav-btn {
@@ -924,7 +1050,7 @@ textarea {
 }
 
 .bionic-rest {
-  opacity: 0.78;
+  opacity: 0.72;
 }
 
 /* ─── RSVP view ───────────────────────────────────────────────────────────── */
@@ -941,12 +1067,29 @@ textarea {
   overflow: hidden;
 }
 
+.rsvp-horizon-line {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(255, 255, 255, 0.07) 20%,
+    rgba(255, 255, 255, 0.07) 80%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
 .rsvp-reticle-guide {
   width: 2px;
-  height: 10px;
-  background: rgba(255, 255, 255, 0.2);
+  height: 12px;
+  background: color-mix(in srgb, var(--rsvp-orp-color, #ff5252) 45%, rgba(255, 255, 255, 0.25));
   margin: 5px 0;
   flex-shrink: 0;
+  border-radius: 1px;
 }
 
 .rsvp-word-grid {
@@ -1701,6 +1844,18 @@ textarea {
   }
 }
 
+@media (max-height: 240px) {
+  .empty-state {
+    padding: 10px 20px;
+    gap: 8px;
+  }
+
+  .empty-state-icon {
+    width: 24px;
+    height: 24px;
+  }
+}
+
 @media (max-height: 200px) {
   .drag-strip {
     height: 6px;
@@ -1712,5 +1867,9 @@ textarea {
 
   .tab-bar {
     height: 22px;
+  }
+
+  .empty-state-icon {
+    display: none;
   }
 }

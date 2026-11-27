@@ -1,8 +1,25 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactElement
+} from 'react'
 import type { Settings, Session, ShortcutId } from '../../../shared/types'
 import { splitSentences, findParagraphStart, clampSentenceIndex } from '../lib/sentences'
 import { tokenizeBionic } from '../lib/bionic'
 import { AutoScroller } from '../lib/autoscroll'
+import { computeStageOptics, isDarkColor } from '../lib/optics'
+import { getThemeColors } from '../lib/themes'
+import {
+  countWords,
+  estimateRemainingSeconds,
+  formatDurationCompact,
+  reflowWrappedText
+} from '../lib/reflow'
 import RsvpView from './RsvpView'
 
 function BionicText({ text, strength }: { text: string; strength: number }): ReactElement {
@@ -49,11 +66,15 @@ export default function Reader({
   onSettingsChange
 }: ReaderProps): ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
+  const progressFillRef = useRef<HTMLDivElement>(null)
   const [sentenceIndex, setSentenceIndex] = useState(0)
   const sentenceIndexRef = useRef(0)
   const [scrolling, setScrolling] = useState(false)
   const [showEnd, setShowEnd] = useState(false)
   const [windowHeight, setWindowHeight] = useState(window.innerHeight)
+  const [stageSize, setStageSize] = useState({ width: window.innerWidth, height: window.innerHeight })
+  const [scrollEdges, setScrollEdges] = useState({ fadeTop: false, fadeBottom: false, progressStep: 0 })
+  const scrollEdgesRef = useRef(scrollEdges)
   const scrollerRef = useRef(new AutoScroller())
   const savedScrollTopRef = useRef(0)
   const prevSessionKeyRef = useRef<string>(
@@ -67,16 +88,77 @@ export default function Reader({
   const isStreamingRef = useRef(isStreaming)
   isStreamingRef.current = isStreaming
   const finishedScrollKeyRef = useRef<string | null>(null)
+
+  const displayText = useMemo(
+    () => (settings.smartReflow && text ? reflowWrappedText(text) : text),
+    [text, settings.smartReflow]
+  )
+
   const prevScrollAnchorRef = useRef({
     sessionKey: prevSessionKeyRef.current,
     index: 0,
     pageMode: settings.pageMode,
-    text
+    text: displayText
   })
 
-  const sentences = useMemo(() => splitSentences(text), [text])
+  const sentences = useMemo(() => splitSentences(displayText), [displayText])
+  const wordCount = useMemo(() => countWords(displayText), [displayText])
 
   const clampedIndex = clampSentenceIndex(sentenceIndex, sentences.length)
+
+  const activeTheme = useMemo(
+    () => getThemeColors(settings.theme, settings.bgColor, settings.textColor),
+    [settings.theme, settings.bgColor, settings.textColor]
+  )
+  const darkPolarity = useMemo(() => isDarkColor(activeTheme.bg), [activeTheme.bg])
+
+  const optics = useMemo(
+    () =>
+      computeStageOptics(
+        stageSize.width,
+        stageSize.height,
+        {
+          fontSize: settings.fontSize,
+          lineHeight: settings.lineHeight,
+          letterSpacing: settings.letterSpacing,
+          padding: settings.padding,
+          maxContentWidth: settings.maxContentWidth,
+          responsiveScale: settings.responsiveScale
+        },
+        darkPolarity
+      ),
+    [
+      stageSize.width,
+      stageSize.height,
+      settings.fontSize,
+      settings.lineHeight,
+      settings.letterSpacing,
+      settings.padding,
+      settings.maxContentWidth,
+      settings.responsiveScale,
+      darkPolarity
+    ]
+  )
+
+  const updateScrollTelemetry = useCallback((): void => {
+    const el = containerRef.current
+    if (!el) return
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
+    const ratio = maxScroll > 0 ? Math.max(0, Math.min(1, el.scrollTop / maxScroll)) : 0
+    if (progressFillRef.current) {
+      progressFillRef.current.style.width = `${(ratio * 100).toFixed(1)}%`
+    }
+    const fadeTop = maxScroll > 6 && el.scrollTop > 6
+    const fadeBottom = maxScroll > 6 && el.scrollTop < maxScroll - 6
+    // Quantize React state updates to 5% buckets (~20 updates max across whole doc) so 60 FPS scroll stays allocation-free
+    const progressStep = Math.round(ratio * 20)
+    const prev = scrollEdgesRef.current
+    if (prev.fadeTop !== fadeTop || prev.fadeBottom !== fadeBottom || prev.progressStep !== progressStep) {
+      const next = { fadeTop, fadeBottom, progressStep }
+      scrollEdgesRef.current = next
+      setScrollEdges(next)
+    }
+  }, [])
 
   useEffect(() => {
     sentenceIndexRef.current = clampedIndex
@@ -87,6 +169,21 @@ export default function Reader({
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect
+      if (!rect) return
+      const w = Math.round(rect.width)
+      const h = Math.round(rect.height)
+      setStageSize((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }))
+      updateScrollTelemetry()
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [displayText, settings.readingMode, updateScrollTelemetry])
 
   const currentKey = currentSession
     ? `${currentSession.id}:${currentSession.createdAt}:${currentSession.bridgeMessageId ?? ''}`
@@ -126,21 +223,25 @@ export default function Reader({
     const textChangedInPlace =
       prev.sessionKey === currentKey &&
       prev.pageMode === settings.pageMode &&
-      prev.text !== text
+      prev.text !== displayText
 
     prevScrollAnchorRef.current = {
       sessionKey: currentKey,
       index: clampedIndex,
       pageMode: settings.pageMode,
-      text
+      text: displayText
     }
 
-    if (sentences.length === 0) return
+    if (sentences.length === 0) {
+      updateScrollTelemetry()
+      return
+    }
 
     if (textChangedInPlace) {
       if (containerRef.current && !scrollerRef.current.isRunning()) {
         containerRef.current.scrollTop = savedScrollTopRef.current
       }
+      updateScrollTelemetry()
       return
     }
 
@@ -149,12 +250,14 @@ export default function Reader({
         containerRef.current.scrollTop = 0
         savedScrollTopRef.current = 0
       }
+      updateScrollTelemetry()
       return
     }
 
     const el = containerRef.current?.querySelector(`[data-i="${clampedIndex}"]`)
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [clampedIndex, currentKey, sentences.length, settings.pageMode, text])
+    updateScrollTelemetry()
+  }, [clampedIndex, currentKey, sentences.length, settings.pageMode, displayText, updateScrollTelemetry])
 
   const goToSentence = useCallback(
     (next: number) => {
@@ -168,30 +271,13 @@ export default function Reader({
     [sentences.length, onSentenceChange]
   )
 
-  useEffect(() => {
-    scrollerRef.current.setStreaming(isStreaming)
-  }, [isStreaming])
-
-  useEffect(() => {
-    scrollerRef.current.setLoop(settings.autoScrollLoop)
-  }, [settings.autoScrollLoop])
-
-  useEffect(() => {
-    if (!settings.pauseScrollOnHover) {
-      scrollerRef.current.setHoverPaused(false)
-    }
-  }, [settings.pauseScrollOnHover])
-
-  useEffect(() => {
-    scrollerRef.current.setSpeed(settings.autoScrollSpeed)
-  }, [settings.autoScrollSpeed])
-
-  // Autoscroll control
   const startScroll = useCallback(() => {
-    if (!containerRef.current) return
     const container = containerRef.current
+    if (!container) return
     const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight)
-    if (!isStreaming && maxScroll > 0 && container.scrollTop >= maxScroll - 2) {
+    const atBottom = maxScroll > 0 && container.scrollTop >= maxScroll - 2
+    if (atBottom && (finishedScrollKeyRef.current === scrollSessionKeyRef.current || !isStreamingRef.current)) {
+      finishedScrollKeyRef.current = null
       container.scrollTop = 0
       savedScrollTopRef.current = 0
     }
@@ -238,6 +324,12 @@ export default function Reader({
     }
   }, [scrolling, startScroll, stopScroll])
 
+  // Update active autoscroller speed live without resetting smoothness tracking
+  useEffect(() => {
+    scrollerRef.current.setSpeed(settings.autoScrollSpeed)
+    scrollerRef.current.setLoop(settings.autoScrollLoop)
+  }, [settings.autoScrollSpeed, settings.autoScrollLoop])
+
   // Cleanup autoscroller RAF on unmount
   useEffect(() => {
     const scroller = scrollerRef.current
@@ -257,6 +349,16 @@ export default function Reader({
       goToSentence(sentenceIndexRef.current + delta)
     },
     [goToSentence]
+  )
+
+  const adjustScrollSpeed = useCallback(
+    (delta: number) => {
+      const next = Math.max(10, Math.min(400, settings.autoScrollSpeed + delta))
+      if (next !== settings.autoScrollSpeed) {
+        onSettingsChange({ autoScrollSpeed: next })
+      }
+    },
+    [settings.autoScrollSpeed, onSettingsChange]
   )
 
   // Handle global shortcut commands forwarded from App
@@ -342,9 +444,31 @@ export default function Reader({
           }
           break
         }
+        case '[': {
+          if (!settings.pageMode) {
+            e.preventDefault()
+            adjustScrollSpeed(-10)
+          }
+          break
+        }
+        case ']': {
+          if (!settings.pageMode) {
+            e.preventDefault()
+            adjustScrollSpeed(10)
+          }
+          break
+        }
       }
     },
-    [settings.pageMode, sentences, stepSentence, goToSentence, onStepAnswer, toggleScroll]
+    [
+      settings.pageMode,
+      sentences,
+      stepSentence,
+      goToSentence,
+      onStepAnswer,
+      toggleScroll,
+      adjustScrollSpeed
+    ]
   )
 
   // Ctrl + Wheel font size adjustment (±2 per notch)
@@ -363,9 +487,11 @@ export default function Reader({
   if (settings.readingMode === 'rsvp') {
     return (
       <RsvpView
-        text={text}
+        text={displayText}
         sessionId={currentSession?.id ?? null}
         wpm={settings.rsvpWpm}
+        baseFontSize={settings.fontSize}
+        responsiveScale={settings.responsiveScale}
         windowHeight={windowHeight}
         cursorHideOnPlay={settings.cursorHideOnPlay}
         commandEvent={commandEvent}
@@ -436,15 +562,48 @@ export default function Reader({
   const showNavBar = (tabCount > 0 || sentences.length > 0) && windowHeight >= 72
   const isBionic = settings.readingMode === 'bionic'
   const hideStageCursor = settings.cursorHideOnPlay && (scrolling || isStreaming)
+  const isMediumWidth = stageSize.width >= 440
+  const isWideStage = stageSize.width >= 680
+
+  const progressRatio = settings.pageMode
+    ? sentences.length > 1
+      ? clampedIndex / (sentences.length - 1)
+      : 1
+    : scrollEdges.progressStep / 20
+  const remainingSec = estimateRemainingSeconds(wordCount, progressRatio, 150)
+
+  const stageStyle = {
+    '--stage-font-size': `${optics.effectiveFontSize}px`,
+    '--stage-line-height': `${optics.effectiveLineHeight}`,
+    '--stage-letter-spacing': `${optics.effectiveLetterSpacing}px`,
+    '--stage-pad-x': `${optics.effectivePaddingX}px`,
+    '--stage-pad-y': `${optics.effectivePaddingY}px`
+  } as CSSProperties
+
+  const containerClasses = [
+    'reader-container',
+    'teleprompter-stage',
+    !settings.showScrollbar ? 'scrollbar-hidden' : '',
+    settings.edgeFade && !settings.pageMode && scrollEdges.fadeTop ? 'fade-top' : '',
+    settings.edgeFade && !settings.pageMode && scrollEdges.fadeBottom ? 'fade-bottom' : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div className={`reader-stage-wrap${hideStageCursor ? ' cursor-hide' : ''}`}>
+      <div
+        className={`reader-stage-wrap${hideStageCursor ? ' cursor-hide' : ''}`}
+        style={stageStyle}
+      >
         {settings.readingGuide && !settings.pageMode && (
-          <div className="reading-guide-band" aria-hidden="true" />
+          <div className="reading-guide-band" aria-hidden="true">
+            <span className="reading-guide-tick left" />
+            <span className="reading-guide-tick right" />
+          </div>
         )}
         <div
-          className={`reader-container${!settings.showScrollbar ? ' scrollbar-hidden' : ''}`}
+          className={containerClasses}
           ref={containerRef}
           tabIndex={0}
           onKeyDown={handleKeyDown}
@@ -463,6 +622,7 @@ export default function Reader({
             if (containerRef.current) {
               savedScrollTopRef.current = containerRef.current.scrollTop
             }
+            updateScrollTelemetry()
           }}
           style={{ flex: 1, minHeight: 0, outline: 'none' }}
         >
@@ -479,9 +639,9 @@ export default function Reader({
                 )}
               </span>
             ) : isBionic ? (
-              <BionicText text={text} strength={settings.bionicStrength} />
+              <BionicText text={displayText} strength={settings.bionicStrength} />
             ) : (
-              text
+              displayText
             )}
           </div>
           {showEnd && <div className="end-banner">End</div>}
@@ -490,6 +650,14 @@ export default function Reader({
 
       {showNavBar && (
         <div className="reader-nav-bar">
+          <div className="reader-progress-track" aria-hidden="true">
+            <div
+              ref={progressFillRef}
+              className="reader-progress-fill"
+              style={settings.pageMode ? { width: `${(progressRatio * 100).toFixed(1)}%` } : undefined}
+            />
+          </div>
+
           {/* Left: previous / next answer (or sentence page when pageMode is enabled) */}
           <div className="reader-nav-left">
             {settings.pageMode ? (
@@ -551,7 +719,52 @@ export default function Reader({
             )}
           </div>
 
-          {/* Right: scroll toggle */}
+          {/* Center: speech timing & optical stage readout on medium+ windows */}
+          {isMediumWidth && (
+            <div className="reader-nav-center">
+              <span className="reader-hud-meta" title="Total words & estimated speech duration (~150 WPM)">
+                {wordCount}w · ~{formatDurationCompact(remainingSec)}
+              </span>
+              {isWideStage && (
+                <>
+                  <span
+                    className="reader-hud-chip"
+                    title={
+                      settings.responsiveScale
+                        ? `Responsive optics: ${optics.effectiveFontSize}px (base ${settings.fontSize}px) · ~${optics.estimatedCpl} chars/line`
+                        : `Fixed font: ${optics.effectiveFontSize}px · ~${optics.estimatedCpl} chars/line`
+                    }
+                  >
+                    {optics.effectiveFontSize}px · ~{optics.estimatedCpl}ch
+                  </span>
+                  {!settings.pageMode && (
+                    <>
+                      <button
+                        type="button"
+                        className={`reader-nav-btn reader-hud-toggle${settings.readingGuide ? ' active' : ''}`}
+                        title="Toggle optical reading focus band"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => onSettingsChange({ readingGuide: !settings.readingGuide })}
+                      >
+                        Focus
+                      </button>
+                      <button
+                        type="button"
+                        className={`reader-nav-btn reader-hud-toggle${settings.smartReflow ? ' active' : ''}`}
+                        title="Toggle smart PDF / line-wrap reflow"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => onSettingsChange({ smartReflow: !settings.smartReflow })}
+                      >
+                        Reflow
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Right: primary scroll toggle (kept first button for automation) + speed steppers */}
           {!settings.pageMode && (
             <div className="reader-nav-right">
               <button
@@ -579,6 +792,31 @@ export default function Reader({
                   </>
                 )}
               </button>
+              {isWideStage && (
+                <div className="reader-speed-inline" title="Adjust teleprompter scroll speed ([ / ])">
+                  <button
+                    type="button"
+                    className="reader-nav-btn"
+                    aria-label="Decrease scroll speed"
+                    disabled={settings.autoScrollSpeed <= 10}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => adjustScrollSpeed(-10)}
+                  >
+                    −
+                  </button>
+                  <span className="reader-nav-count">{settings.autoScrollSpeed} px/s</span>
+                  <button
+                    type="button"
+                    className="reader-nav-btn"
+                    aria-label="Increase scroll speed"
+                    disabled={settings.autoScrollSpeed >= 400}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => adjustScrollSpeed(10)}
+                  >
+                    +
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

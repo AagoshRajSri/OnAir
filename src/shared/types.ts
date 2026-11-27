@@ -46,7 +46,10 @@ export interface Settings {
   maxContentWidth: number    // 0 = full width, or 320–1400 px centered column
   mirrorX: boolean           // horizontal flip for glass beam-splitter teleprompters
   mirrorY: boolean           // vertical flip for inverted teleprompter rigs
-  readingGuide: boolean      // horizontal optical eye-line focus band in Flow mode
+  readingGuide: boolean      // horizontal optical eye-line focus band in Flow/Bionic modes
+  responsiveScale: boolean   // scale stage typography cleanly with viewport size & aspect ratio
+  smartReflow: boolean       // unwrap broken PDF/copied soft line-wraps for flowing teleprompting
+  edgeFade: boolean          // subtle top/bottom peripheral gradient fade on overflowing text
   // ── Chrome / UI appearance ──────────────────────────────────
   uiAccentColor: string      // replaces amber accent (#f59e0b default)
   uiSurfaceColor: string     // chrome panel bg (#0d0d0d default)
@@ -108,7 +111,10 @@ export const DEFAULT_SETTINGS: Settings = {
   maxContentWidth: 0,
   mirrorX: false,
   mirrorY: false,
-  readingGuide: false,
+  readingGuide: true,
+  responsiveScale: true,
+  smartReflow: true,
+  edgeFade: true,
   // Chrome / UI
   uiAccentColor: '#f59e0b',
   uiSurfaceColor: '#0d0d0d',

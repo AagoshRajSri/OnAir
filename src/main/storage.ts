@@ -89,7 +89,10 @@ function clampSettings(s: Settings): Settings {
   s.maxContentWidth = rawMaxW <= 0 ? 0 : Math.max(320, Math.min(1400, rawMaxW))
   s.mirrorX = Boolean(s.mirrorX)
   s.mirrorY = Boolean(s.mirrorY)
-  s.readingGuide = Boolean(s.readingGuide)
+  s.readingGuide = s.readingGuide !== false
+  s.responsiveScale = s.responsiveScale !== false
+  s.smartReflow = s.smartReflow !== false
+  s.edgeFade = s.edgeFade !== false
   s.uiAccentColor = clampHex(s.uiAccentColor, '#f59e0b')
   s.uiSurfaceColor = clampHex(s.uiSurfaceColor, '#0d0d0d')
   s.showChromeBorder = s.showChromeBorder !== false

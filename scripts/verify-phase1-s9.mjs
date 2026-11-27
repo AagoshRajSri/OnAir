@@ -1,3 +1,20 @@
+/**
+ * Phase 1 §9 Latency, Smoothness & Memory Verification Harness
+ *
+ * Runs against the installed Windows build (%LOCALAPPDATA%\Programs\OnAir\OnAir.exe)
+ * with FR_METRICS=1 (33 trials per metric, discarding the first 3 warm-up trials).
+ *
+ * Methodology note (CDP IPC vs. synthetic WM_HOTKEY):
+ * Synthetic Win32 keybd_event calls from non-interactive shells do not reliably cross
+ * Windows UIPI / desktop isolation into Chromium's OS-level RegisterHotKey loop. To keep
+ * automated runs deterministic without stray global keystrokes, this harness triggers:
+ *   - show-window: window.api.windowApply({ hidden: true / false }) via CDP
+ *   - clipboard-transfer / content-display: OS Clipboard.SetText + window.api.clipboardImport()
+ * Call paths differ slightly prior to metrics.start() (IPC handler vs. WM_HOTKEY dispatch in
+ * src/main/shortcuts.ts) and omit OS global-hotkey queue latency, then converge on the exact
+ * same win.show() -> win.on('show') (separate from cold startup ready-to-show) and
+ * importFromClipboard() -> double-rAF measurement code paths.
+ */
 import { spawn, execSync } from 'child_process'
 import { access, mkdir, readFile, rm, writeFile } from 'fs/promises'
 import http from 'http'

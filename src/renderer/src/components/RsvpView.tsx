@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import type { ShortcutId } from '../../../shared/types'
 import { computeWordDelayMs, tokenizeRsvp } from '../lib/rsvp'
+import { computeRsvpFontSize } from '../lib/optics'
+import { estimateRemainingSeconds, formatDurationCompact } from '../lib/reflow'
 import { isMetricsTrackingEnabled } from '../lib/autoscroll'
 
 interface RsvpViewProps {
   text: string
   sessionId: string | null
   wpm: number
+  baseFontSize: number
+  responsiveScale: boolean
   windowHeight: number
   cursorHideOnPlay?: boolean
   commandEvent: { cmd: ShortcutId; seq: number } | null
@@ -23,6 +27,8 @@ export default function RsvpView({
   text,
   sessionId,
   wpm,
+  baseFontSize,
+  responsiveScale,
   windowHeight,
   cursorHideOnPlay = false,
   commandEvent,
@@ -32,8 +38,10 @@ export default function RsvpView({
   const tokens = useMemo(() => tokenizeRsvp(text), [text])
   const [wordIndex, setWordIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [stageSize, setStageSize] = useState({ width: window.innerWidth, height: window.innerHeight })
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
   const wordIndexRef = useRef(0)
   const playingRef = useRef(false)
   const wpmRef = useRef(wpm)
@@ -43,6 +51,41 @@ export default function RsvpView({
   const prevSessionIdRef = useRef<string | null>(sessionId)
 
   wpmRef.current = wpm
+
+  const longestWordChars = useMemo(() => {
+    let maxLen = 8
+    for (const tok of tokens) {
+      const len = tok.prefix.length + 1 + tok.suffix.length
+      if (len > maxLen) maxLen = len
+    }
+    return Math.min(maxLen, 20)
+  }, [tokens])
+
+  const rsvpFontSize = useMemo(
+    () =>
+      computeRsvpFontSize(
+        stageSize.width,
+        stageSize.height,
+        baseFontSize,
+        responsiveScale,
+        longestWordChars
+      ),
+    [stageSize.width, stageSize.height, baseFontSize, responsiveScale, longestWordChars]
+  )
+
+  useEffect(() => {
+    const el = stageRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect
+      if (!rect) return
+      const w = Math.round(rect.width)
+      const h = Math.round(rect.height)
+      setStageSize((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [tokens.length])
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -242,7 +285,10 @@ export default function RsvpView({
 
   const clampedIdx = Math.max(0, Math.min(wordIndex, tokens.length - 1))
   const current = tokens[clampedIdx]
+  const progressRatio = tokens.length > 1 ? clampedIdx / (tokens.length - 1) : 1
+  const remainingSec = estimateRemainingSeconds(tokens.length, progressRatio, wpm)
   const showNavBar = windowHeight >= 72
+  const isWide = stageSize.width >= 540
 
   return (
     <div
@@ -254,12 +300,14 @@ export default function RsvpView({
       style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, outline: 'none' }}
     >
       <div
+        ref={stageRef}
         className={`rsvp-stage${cursorHideOnPlay && isPlaying ? ' cursor-hide' : ''}`}
         onClick={togglePlay}
         title="Click or press Space to play/pause"
       >
+        <div className="rsvp-horizon-line" aria-hidden="true" />
         <div className="rsvp-reticle-guide rsvp-reticle-top" aria-hidden="true" />
-        <div className="rsvp-word-grid">
+        <div className="rsvp-word-grid" style={{ fontSize: `${rsvpFontSize}px` }}>
           <span className="rsvp-prefix">{current.prefix}</span>
           <span className="rsvp-orp">{current.orp}</span>
           <span className="rsvp-suffix">{current.suffix}</span>
@@ -269,7 +317,10 @@ export default function RsvpView({
 
       {showNavBar && (
         <div className="reader-nav-bar">
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <div className="reader-progress-track" aria-hidden="true">
+            <div className="reader-progress-fill" style={{ width: `${(progressRatio * 100).toFixed(1)}%` }} />
+          </div>
+          <div className="reader-nav-left" style={{ gap: 3 }}>
             <button
               type="button"
               className="reader-nav-btn"
@@ -326,7 +377,7 @@ export default function RsvpView({
             </button>
           </div>
 
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <div className="reader-nav-center">
             <button
               type="button"
               className="reader-nav-btn"
@@ -352,14 +403,20 @@ export default function RsvpView({
             >
               +
             </button>
+            {isWide && (
+              <span className="reader-hud-meta" title="Estimated time remaining at current WPM">
+                · ~{formatDurationCompact(remainingSec)} left
+              </span>
+            )}
           </div>
 
-          <span className="reader-nav-count" title="Current word / Total words">
-            {clampedIdx + 1} / {tokens.length}
-          </span>
+          <div className="reader-nav-right">
+            <span className="reader-nav-count" title="Current word / Total words">
+              {clampedIdx + 1} / {tokens.length}
+            </span>
+          </div>
         </div>
       )}
     </div>
   )
 }
-
