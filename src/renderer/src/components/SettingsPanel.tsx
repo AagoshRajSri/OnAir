@@ -51,8 +51,8 @@ const SHORTCUT_LABELS: Record<ShortcutId, string> = {
   importClipboard: 'Import clipboard',
   fontUp: 'Font size +2',
   fontDown: 'Font size −2',
-  nextSentence: 'Next sentence',
-  prevSentence: 'Previous sentence',
+  nextSentence: 'Next answer',
+  prevSentence: 'Previous answer',
   toggleScroll: 'Start / Pause scroll',
   toggleLock: 'Lock on screen',
   back: 'Back to previous',
@@ -890,7 +890,7 @@ export default function SettingsPanel({
             Regenerate</button>
         </div>
         <p className="sp-hint">
-          Listens on localhost only. Connections are rejected unless Origin matches the Extension ID above.
+          Listens on 127.0.0.1 only. Each mirrored answer opens a new tab in OnAir; connections require matching Extension ID + token.
         </p>
       </>
     )

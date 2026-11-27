@@ -27,9 +27,12 @@ interface ReaderProps {
   text: string
   settings: Settings
   currentSession: Session | null
+  tabIndex: number
+  tabCount: number
   isStreaming?: boolean
   commandEvent: { cmd: ShortcutId; seq: number } | null
   onSentenceChange: (index: number) => void
+  onStepAnswer: (delta: -1 | 1) => void
   onSettingsChange: (patch: Partial<Settings>) => void
 }
 
@@ -37,9 +40,12 @@ export default function Reader({
   text,
   settings,
   currentSession,
+  tabIndex,
+  tabCount,
   isStreaming = false,
   commandEvent,
   onSentenceChange,
+  onStepAnswer,
   onSettingsChange
 }: ReaderProps): ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -255,10 +261,10 @@ export default function Reader({
     if (!commandEvent) return
     switch (commandEvent.cmd) {
       case 'nextSentence':
-        stepSentence(1)
+        if (settings.pageMode) stepSentence(1)
         break
       case 'prevSentence':
-        stepSentence(-1)
+        if (settings.pageMode) stepSentence(-1)
         break
       case 'toggleScroll':
         toggleScroll()
@@ -266,52 +272,76 @@ export default function Reader({
       default:
         break
     }
-  }, [commandEvent, stepSentence, toggleScroll])
+  }, [commandEvent, settings.pageMode, stepSentence, toggleScroll])
 
   // Keyboard navigation (window focused, not in edit mode)
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (sentences.length === 0) return
-
       switch (e.key) {
         case 'ArrowRight': {
           e.preventDefault()
-          stepSentence(1)
+          if (settings.pageMode) {
+            stepSentence(1)
+          } else {
+            onStepAnswer(1)
+          }
           break
         }
         case 'ArrowLeft': {
           e.preventDefault()
-          stepSentence(-1)
+          if (settings.pageMode) {
+            stepSentence(-1)
+          } else {
+            onStepAnswer(-1)
+          }
           break
         }
         case 'ArrowDown': {
           e.preventDefault()
-          goToSentence(findParagraphStart(sentences, sentenceIndexRef.current, 1))
+          if (settings.pageMode && sentences.length > 0) {
+            goToSentence(findParagraphStart(sentences, sentenceIndexRef.current, 1))
+          } else {
+            containerRef.current?.scrollBy({ top: 72, behavior: 'smooth' })
+          }
           break
         }
         case 'ArrowUp': {
           e.preventDefault()
-          goToSentence(findParagraphStart(sentences, sentenceIndexRef.current, -1))
+          if (settings.pageMode && sentences.length > 0) {
+            goToSentence(findParagraphStart(sentences, sentenceIndexRef.current, -1))
+          } else {
+            containerRef.current?.scrollBy({ top: -72, behavior: 'smooth' })
+          }
           break
         }
         case 'Home': {
           e.preventDefault()
-          goToSentence(0)
+          if (settings.pageMode && sentences.length > 0) {
+            goToSentence(0)
+          } else {
+            containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+          }
           break
         }
         case 'End': {
           e.preventDefault()
-          goToSentence(sentences.length - 1)
+          if (settings.pageMode && sentences.length > 0) {
+            goToSentence(sentences.length - 1)
+          } else if (containerRef.current) {
+            containerRef.current.scrollTo({ top: containerRef.current.scrollHeight, behavior: 'smooth' })
+          }
           break
         }
         case ' ': {
-          e.preventDefault()
-          toggleScroll()
+          if (sentences.length > 0 && !settings.pageMode) {
+            e.preventDefault()
+            toggleScroll()
+          }
           break
         }
       }
     },
-    [sentences, stepSentence, goToSentence, toggleScroll]
+    [settings.pageMode, sentences, stepSentence, goToSentence, onStepAnswer, toggleScroll]
   )
 
   // Ctrl + Wheel font size adjustment (±2 per notch)
@@ -343,28 +373,64 @@ export default function Reader({
   }
 
   if (!text) {
+    const showEmptyNav = tabCount > 1 && windowHeight >= 72
     return (
-      <div
-        className={`reader-container${!settings.showScrollbar ? ' scrollbar-hidden' : ''}`}
-        ref={containerRef}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}
-      >
-        <div className="empty-state">
-          <svg className="empty-state-icon" viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round">
-            <rect x="6" y="4" width="28" height="32" rx="3" />
-            <path d="M12 14h16M12 20h16M12 26h10" strokeLinecap="round" />
-          </svg>
-          <p className="empty-state-heading">No script loaded</p>
-          <p className="empty-state-hint">
-            Paste, type, or drag a file here<br />
-            or press <span className="kbd">Ctrl+Alt+V</span> from anywhere
-          </p>
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        <div
+          className={`reader-container${!settings.showScrollbar ? ' scrollbar-hidden' : ''}`}
+          ref={containerRef}
+          tabIndex={0}
+          onKeyDown={handleKeyDown}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, outline: 'none' }}
+        >
+          <div className="empty-state">
+            <svg className="empty-state-icon" viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round">
+              <rect x="6" y="4" width="28" height="32" rx="3" />
+              <path d="M12 14h16M12 20h16M12 26h10" strokeLinecap="round" />
+            </svg>
+            <p className="empty-state-heading">No script loaded</p>
+            <p className="empty-state-hint">
+              Paste, type, or drag a file here<br />
+              or press <span className="kbd">Ctrl+Alt+V</span> from anywhere
+            </p>
+          </div>
         </div>
+        {showEmptyNav && (
+          <div className="reader-nav-bar">
+            <div className="reader-nav-left">
+              <button
+                type="button"
+                className="reader-nav-btn"
+                aria-label="Previous answer"
+                title="Previous answer (Left / Ctrl+Alt+Left)"
+                disabled={tabIndex <= 0}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onStepAnswer(-1)}
+              >
+                ←
+              </button>
+              <span className="reader-nav-count" title="Current / Total answers">
+                {tabIndex + 1} / {tabCount}
+              </span>
+              <button
+                type="button"
+                className="reader-nav-btn"
+                aria-label="Next answer"
+                title="Next answer (Right / Ctrl+Alt+Right)"
+                disabled={tabIndex < 0 || tabIndex >= tabCount - 1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onStepAnswer(1)}
+              >
+                →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
 
-  const showNavBar = sentences.length > 0 && windowHeight >= 72
+  const showNavBar = (tabCount > 0 || sentences.length > 0) && windowHeight >= 72
   const isBionic = settings.readingMode === 'bionic'
   const hideStageCursor = settings.cursorHideOnPlay && (scrolling || isStreaming)
 
@@ -409,24 +475,10 @@ export default function Reader({
                   sentences[clampedIndex]?.text.trimStart()
                 )}
               </span>
+            ) : isBionic ? (
+              <BionicText text={text} strength={settings.bionicStrength} />
             ) : (
-              sentences.map((seg) => (
-                <span
-                  key={seg.index}
-                  data-i={seg.index}
-                  className={`sentence-span${clampedIndex === seg.index ? ' active' : ''}`}
-                  onClick={() => {
-                    if (window.getSelection()?.toString()) return
-                    goToSentence(seg.index)
-                  }}
-                >
-                  {isBionic ? (
-                    <BionicText text={seg.text} strength={settings.bionicStrength} />
-                  ) : (
-                    seg.text
-                  )}
-                </span>
-              ))
+              text
             )}
           </div>
           {showEnd && <div className="end-banner">End</div>}
@@ -435,33 +487,65 @@ export default function Reader({
 
       {showNavBar && (
         <div className="reader-nav-bar">
-          {/* Left: prev + counter */}
+          {/* Left: previous / next answer (or sentence page when pageMode is enabled) */}
           <div className="reader-nav-left">
-            <button
-              type="button"
-              className="reader-nav-btn"
-              aria-label="Previous sentence"
-              title="Previous sentence (Left / Ctrl+Alt+Left)"
-              disabled={clampedIndex <= 0}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => stepSentence(-1)}
-            >
-              ←
-            </button>
-            <span className="reader-nav-count" title="Current / Total sentences">
-              {clampedIndex + 1} / {sentences.length}
-            </span>
-            <button
-              type="button"
-              className="reader-nav-btn"
-              aria-label="Next sentence"
-              title="Next sentence (Right / Ctrl+Alt+Right)"
-              disabled={clampedIndex >= sentences.length - 1}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => stepSentence(1)}
-            >
-              →
-            </button>
+            {settings.pageMode ? (
+              <>
+                <button
+                  type="button"
+                  className="reader-nav-btn"
+                  aria-label="Previous page"
+                  title="Previous page (Left / Ctrl+Alt+Left)"
+                  disabled={clampedIndex <= 0}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => stepSentence(-1)}
+                >
+                  ←
+                </button>
+                <span className="reader-nav-count" title="Current / Total pages">
+                  {clampedIndex + 1} / {sentences.length}
+                </span>
+                <button
+                  type="button"
+                  className="reader-nav-btn"
+                  aria-label="Next page"
+                  title="Next page (Right / Ctrl+Alt+Right)"
+                  disabled={clampedIndex >= sentences.length - 1}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => stepSentence(1)}
+                >
+                  →
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="reader-nav-btn"
+                  aria-label="Previous answer"
+                  title="Previous answer (Left / Ctrl+Alt+Left)"
+                  disabled={tabIndex <= 0}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onStepAnswer(-1)}
+                >
+                  ←
+                </button>
+                <span className="reader-nav-count" title="Current / Total answers">
+                  {tabCount > 0 && tabIndex >= 0 ? `${tabIndex + 1} / ${tabCount}` : '0 / 0'}
+                </span>
+                <button
+                  type="button"
+                  className="reader-nav-btn"
+                  aria-label="Next answer"
+                  title="Next answer (Right / Ctrl+Alt+Right)"
+                  disabled={tabIndex < 0 || tabIndex >= tabCount - 1}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onStepAnswer(1)}
+                >
+                  →
+                </button>
+              </>
+            )}
           </div>
 
           {/* Right: scroll toggle */}

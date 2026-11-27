@@ -1,6 +1,6 @@
 import { chatgptAdapter } from './providers/chatgpt'
 import { claudeAdapter } from './providers/claude'
-import type { ProviderAdapter, ProviderId } from './providers/types'
+import type { ExtractedReply, ProviderAdapter, ProviderId } from './providers/types'
 
 export const THROTTLE_MS = 50
 export const IDLE_FINALIZE_MS = 1500
@@ -47,6 +47,7 @@ export interface MirrorController {
   start(): void
   stop(): void
   handleMutations(): void
+  syncNow(forceEmit?: boolean): ExtractedReply | null
   isObserving(): boolean
 }
 
@@ -62,6 +63,7 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
   } = options
 
   let enabled = false
+  let hasStartedBefore = false
   let observer: MutationObserver | null = null
   let throttleTimer: ReturnType<typeof setTimeout> | null = null
   let idleFinalTimer: ReturnType<typeof setTimeout> | null = null
@@ -107,13 +109,7 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
     }, idleFinalizeMs)
   }
 
-  const scanAndEmit = (): void => {
-    const mutationT0 = pendingMutationT0
-    pendingMutationT0 = null
-    if (!enabled) return
-    const reply = adapter.getLatestReply(doc)
-    if (!reply || !reply.text) return
-
+  const emitReply = (reply: ExtractedReply, t0: number, forceEmit: boolean): void => {
     activeReplyId = reply.id
     const prev = stateById.get(reply.id)
     const flippedToFinal = Boolean(prev?.isStreaming && !reply.isStreaming)
@@ -122,7 +118,7 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
     const textChanged = !prev || prev.text !== reply.text
     const needsFinalEmit = isFinal && (!prev || !prev.finalSent)
 
-    if (textChanged || needsFinalEmit) {
+    if (forceEmit || textChanged || needsFinalEmit) {
       const nextSeq = (prev?.seq ?? 0) + 1
       stateById.set(reply.id, {
         text: reply.text,
@@ -137,7 +133,7 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
         seq: nextSeq,
         text: reply.text,
         final: isFinal,
-        t0: mutationT0 ?? epochNow()
+        t0
       })
     } else if (prev && prev.isStreaming !== reply.isStreaming) {
       stateById.set(reply.id, {
@@ -147,11 +143,30 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
     }
 
     const latestState = stateById.get(reply.id)
-    if (latestState && !latestState.finalSent) {
+    if (enabled && latestState && !latestState.finalSent) {
       resetIdleTimer(reply.id)
     } else {
       clearIdleTimer()
     }
+  }
+
+  const scanAndEmit = (forceEmit = false): ExtractedReply | null => {
+    const mutationT0 = pendingMutationT0
+    pendingMutationT0 = null
+    if (!enabled) return null
+    const reply = adapter.getLatestReply(doc)
+    if (!reply || !reply.text) return null
+    emitReply(reply, mutationT0 ?? epochNow(), forceEmit)
+    return reply
+  }
+
+  const syncNow = (forceEmit = false): ExtractedReply | null => {
+    const reply = adapter.getLatestReply(doc)
+    if (!reply || !reply.text) return null
+    if (enabled || forceEmit) {
+      emitReply(reply, epochNow(), forceEmit)
+    }
+    return reply
   }
 
   const handleMutations = (): void => {
@@ -188,6 +203,9 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
   const start = (): void => {
     if (enabled) return
     enabled = true
+    const forceInitialSync = hasStartedBefore
+    hasStartedBefore = true
+
     const ObserverCtor = doc.defaultView?.MutationObserver ?? globalThis.MutationObserver
     if (ObserverCtor && doc.body) {
       observer = new ObserverCtor(() => {
@@ -202,7 +220,7 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
       })
     }
     lastScanMs = now()
-    scanAndEmit()
+    scanAndEmit(forceInitialSync)
   }
 
   const stop = (): void => {
@@ -223,6 +241,7 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
     start,
     stop,
     handleMutations,
+    syncNow,
     isObserving: () => observer !== null
   }
 }
@@ -266,12 +285,34 @@ if (
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!message || typeof message !== 'object') return false
       if (message.type === 'ping-content') {
-        sendResponse({ alive: true, provider: adapter.id, enabled: tabEnabled })
+        const latest = adapter.getLatestReply(document)
+        sendResponse({
+          alive: true,
+          provider: adapter.id,
+          enabled: tabEnabled,
+          hasReply: Boolean(latest?.text),
+          isStreaming: Boolean(latest?.isStreaming)
+        })
         return false
       }
       if (message.type === 'tab-enabled-changed') {
         applyEnabled(Boolean(message.enabled))
         sendResponse({ ok: true, enabled: tabEnabled })
+        return false
+      }
+      if (message.type === 'extract-latest-answer') {
+        const latest = adapter.getLatestReply(document)
+        sendResponse({
+          ok: Boolean(latest?.text),
+          provider: adapter.id,
+          reply: latest
+            ? {
+                id: latest.id,
+                text: latest.text,
+                isStreaming: latest.isStreaming
+              }
+            : null
+        })
         return false
       }
       return false

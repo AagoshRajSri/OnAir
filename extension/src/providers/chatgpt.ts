@@ -16,6 +16,7 @@ const CHATGPT_IGNORE_SELECTORS = [
 ]
 
 const DOCUMENT_POSITION_FOLLOWING = 4
+const stableUserTurnIds = new WeakMap<Element, string>()
 
 export function matchesLocation(locationLike: Pick<Location, 'origin'>): boolean {
   return locationLike.origin === 'https://chatgpt.com'
@@ -51,8 +52,16 @@ export function getLatestReply(root: Document): ExtractedReply | null {
     )
     if (replyNodes.length === 0) return null
 
-    const convPath = root.location?.pathname || 'chat'
-    id = `chatgpt-${convPath}-turn-${userTurns.length}`
+    const cached = stableUserTurnIds.get(lastUser)
+    if (cached) {
+      id = cached
+    } else {
+      const convPath = root.location?.pathname || 'chat'
+      const domTurnId =
+        lastUser.getAttribute('data-message-id') || lastUser.getAttribute('data-turn-id')
+      id = domTurnId ? `chatgpt-${domTurnId}` : `chatgpt-${convPath}-turn-${userTurns.length}`
+      stableUserTurnIds.set(lastUser, id)
+    }
   } else {
     const lastNode = allAssistantNodes[allAssistantNodes.length - 1]
     const turnContainer = lastNode.closest(CHATGPT_TURN_UNIT_SELECTOR)

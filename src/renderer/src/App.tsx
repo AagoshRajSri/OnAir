@@ -119,6 +119,10 @@ export default function App(): ReactElement {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sentenceSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const bridgeSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const editSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingEditSessionRef = useRef<Session | null>(null)
+  const editSnapshotRef = useRef<{ id: string; text: string; title: string } | null>(null)
+  const userEditedTabIdsRef = useRef<Set<string>>(new Set())
   const modeSwitchStartRef = useRef<number | null>(null)
   const activeAiStreamRef = useRef<{
     streamId: string
@@ -130,6 +134,8 @@ export default function App(): ReactElement {
   const streamingIdsRef = useRef<string[]>([])
   const openInNewTabRef = useRef(settings.openInNewTab)
   const saveWatchedRef = useRef(settings.saveWatchedToHistory)
+  const pageModeRef = useRef(settings.pageMode)
+  const tabBarRef = useRef<HTMLDivElement | null>(null)
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const cmdSeq = useRef(0)
   const draggingWinRef = useRef(false)
@@ -147,9 +153,34 @@ export default function App(): ReactElement {
   streamingIdsRef.current = streamingSessionIds
   openInNewTabRef.current = settings.openInNewTab
   saveWatchedRef.current = settings.saveWatchedToHistory
+  pageModeRef.current = settings.pageMode
 
   const currentSession = tabs.find((t) => t.id === activeTabId) ?? null
+  const currentTabIndex = tabs.findIndex((t) => t.id === activeTabId)
   const text = currentSession?.text ?? ''
+
+  const flushPendingEditSave = useCallback((): void => {
+    if (editSaveTimer.current) {
+      clearTimeout(editSaveTimer.current)
+      editSaveTimer.current = null
+    }
+    const pending = pendingEditSessionRef.current
+    if (pending) {
+      pendingEditSessionRef.current = null
+      if (pending.source !== 'clipboard-watch' || saveWatchedRef.current) {
+        void window.api?.sessionSave(pending)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const activeEl = tabBarRef.current?.querySelector('.tab-item.active') as HTMLElement | null
+    activeEl?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeTabId, tabs.length])
+
+  useEffect(() => {
+    return () => flushPendingEditSave()
+  }, [flushPendingEditSave])
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
@@ -220,6 +251,14 @@ export default function App(): ReactElement {
         : undefined
 
       if (existingBridgeSession && payload.bridgeId) {
+        const isAlreadySettled = !streamingIdsRef.current.includes(existingBridgeSession.id)
+        if (
+          userEditedTabIdsRef.current.has(existingBridgeSession.id) &&
+          isAlreadySettled &&
+          payload.final !== false
+        ) {
+          return
+        }
         const sentenceCount = splitSentences(payload.text).length
         const clampedIndex = clampSentenceIndex(existingBridgeSession.sentenceIndex, sentenceCount)
         const updatedSession: Session = {
@@ -253,6 +292,8 @@ export default function App(): ReactElement {
           window.api.sessionSave(updatedSession)
         }
       } else {
+        flushPendingEditSave()
+        editSnapshotRef.current = null
         const newSession: Session = {
           id: newUuid(),
           title: payload.fileName ? payload.fileName.slice(0, 40) : makeTitle(payload.text),
@@ -267,22 +308,18 @@ export default function App(): ReactElement {
 
         const current = tabsRef.current.find((t) => t.id === currentActiveId)
 
-        // Bridge messages (streaming from the Chrome extension) replace the current
-        // active tab in-place during streaming so one answer stays inside a single tab.
-        // Non-bridge imports replace the current tab only when openInNewTab is disabled
-        // or the active tab is empty.
-        const isBridgeStream = payload.source === 'bridge'
-        const currentIsBridgeAndDone =
+        // Reuse only a blank unused placeholder tab (e.g. startup "New tab"), or non-bridge
+        // imports when openInNewTab is disabled. Every new answer opens its own active tab.
+        const currentIsEmptyBlank = Boolean(
           current &&
-          current.source === 'bridge' &&
-          !streamingIdsRef.current.includes(current.id) &&
-          payload.final !== false
+          current.text.trim() === '' &&
+          current.source !== 'bridge' &&
+          !streamingIdsRef.current.includes(current.id)
+        )
 
         const shouldReplaceCurrentTab = Boolean(
           current &&
-          (current.text === '' ||
-            !openInNewTabRef.current ||
-            (isBridgeStream && !currentIsBridgeAndDone))
+          (currentIsEmptyBlank || (payload.source !== 'bridge' && !openInNewTabRef.current))
         )
 
         const finalSession =
@@ -295,6 +332,7 @@ export default function App(): ReactElement {
             ? tabsRef.current.map((t) => (t.id === current.id ? finalSession : t))
             : [...tabsRef.current, finalSession]
 
+        userEditedTabIdsRef.current.delete(finalSession.id)
         tabsRef.current = nextTabs
         setTabs(nextTabs)
         if (currentActiveId && finalSession.id !== currentActiveId) {
@@ -341,22 +379,55 @@ export default function App(): ReactElement {
         })
       })
     },
-    []
+    [flushPendingEditSave]
+  )
+
+  const switchToTab = useCallback(
+    (targetId: string) => {
+      flushPendingEditSave()
+      editSnapshotRef.current = null
+      setIsEditing(false)
+      if (!targetId || targetId === activeTabIdRef.current) return
+      if (activeTabIdRef.current) {
+        setPreviousSessionId(activeTabIdRef.current)
+      }
+      activeTabIdRef.current = targetId
+      setActiveTabId(targetId)
+    },
+    [flushPendingEditSave]
+  )
+
+  const stepAnswer = useCallback(
+    (delta: -1 | 1): void => {
+      const list = tabsRef.current
+      if (list.length <= 1) return
+      const idx = list.findIndex((t) => t.id === activeTabIdRef.current)
+      if (idx < 0) return
+      const next = list[idx + delta]
+      if (!next) return
+      switchToTab(next.id)
+    },
+    [switchToTab]
   )
 
   const openSessionInTabs = useCallback(
     (session: Session) => {
+      flushPendingEditSave()
+      editSnapshotRef.current = null
       if (activeTabId && activeTabId !== session.id) {
         setPreviousSessionId(activeTabId)
       }
       setTabs((prev) => {
         const exists = prev.some((t) => t.id === session.id)
-        return exists ? prev.map((t) => (t.id === session.id ? session : t)) : [...prev, session]
+        const nextTabs = exists ? prev.map((t) => (t.id === session.id ? session : t)) : [...prev, session]
+        tabsRef.current = nextTabs
+        return nextTabs
       })
+      activeTabIdRef.current = session.id
       setActiveTabId(session.id)
       setIsEditing(false)
     },
-    [activeTabId]
+    [activeTabId, flushPendingEditSave]
   )
 
   const handleBack = useCallback(async (): Promise<void> => {
@@ -526,7 +597,21 @@ export default function App(): ReactElement {
           handleSettingsChange({ fontSize: Math.max(8, settings.fontSize - 2) })
           break
         case 'nextSentence':
+          if (pageModeRef.current) {
+            cmdSeq.current += 1
+            setCommandEvent({ cmd, seq: cmdSeq.current })
+          } else {
+            stepAnswer(1)
+          }
+          break
         case 'prevSentence':
+          if (pageModeRef.current) {
+            cmdSeq.current += 1
+            setCommandEvent({ cmd, seq: cmdSeq.current })
+          } else {
+            stepAnswer(-1)
+          }
+          break
         case 'toggleScroll':
           cmdSeq.current += 1
           setCommandEvent({ cmd, seq: cmdSeq.current })
@@ -535,7 +620,7 @@ export default function App(): ReactElement {
           break
       }
     },
-    [settings.fontSize, handleToggleLock, handleSettingsChange, handleBack, handleCycleMode]
+    [settings.fontSize, handleToggleLock, handleSettingsChange, handleBack, handleCycleMode, stepAnswer]
   )
 
   // Register push listeners
@@ -672,6 +757,30 @@ export default function App(): ReactElement {
     }
   }, [handleNewContent, handleCommand, showToast, setIgnoreMouse])
 
+  const enterEditMode = useCallback((): void => {
+    const active = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
+    editSnapshotRef.current = active
+      ? { id: active.id, text: active.text, title: active.title }
+      : null
+    setShowSettings(false)
+    setShowPromptBar(false)
+    setIsEditing(true)
+  }, [])
+
+  const exitEditMode = useCallback((): void => {
+    flushPendingEditSave()
+    editSnapshotRef.current = null
+    setIsEditing(false)
+  }, [flushPendingEditSave])
+
+  const toggleEditMode = useCallback((): void => {
+    if (isEditing) {
+      exitEditMode()
+    } else {
+      enterEditMode()
+    }
+  }, [isEditing, enterEditMode, exitEditMode])
+
   // Local keydowns: Esc aborts AI stream, Ctrl+Alt+P/M fallbacks, Ctrl+E (Edit), Ctrl+V (Paste)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -707,9 +816,15 @@ export default function App(): ReactElement {
           target.isContentEditable)
       )
 
-      if (!inEditable && e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'e' || e.key === 'E')) {
+      if (
+        (!inEditable || target?.classList.contains('edit-textarea')) &&
+        e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key === 'e' || e.key === 'E')
+      ) {
         e.preventDefault()
-        setIsEditing((v) => !v)
+        toggleEditMode()
         return
       }
       if (!isEditing && !inEditable && e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'o' || e.key === 'O')) {
@@ -724,40 +839,85 @@ export default function App(): ReactElement {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isEditing, handleAbortAiPrompt, handleCycleMode, handleBack, handleOpenFile])
+  }, [isEditing, toggleEditMode, handleAbortAiPrompt, handleCycleMode, handleBack, handleOpenFile])
 
-  const handleEditSave = useCallback(
-    async (newText: string): Promise<void> => {
-      setIsEditing(false)
-      // Edit-mode saves apply only steps 1 and 2 (line endings + NUL) per §6.5
-      const normalized = newText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\x00/g, '')
+  const revertEditMode = useCallback(async (): Promise<void> => {
+    if (editSaveTimer.current) {
+      clearTimeout(editSaveTimer.current)
+      editSaveTimer.current = null
+    }
+    pendingEditSessionRef.current = null
+    const snap = editSnapshotRef.current
+    editSnapshotRef.current = null
+    setIsEditing(false)
 
-      if (currentSession) {
-        const updated: Session = {
-          ...currentSession,
-          text: normalized,
-          title: makeTitle(normalized),
-          updatedAt: Date.now()
-        }
-        setTabs((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-        await window.api.sessionSave(updated)
-      } else {
-        const newSession: Session = {
-          id: newUuid(),
-          title: makeTitle(normalized),
-          source: 'typed',
-          text: normalized,
-          sentenceIndex: 0,
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        }
-        setTabs((prev) => [...prev, newSession])
-        setActiveTabId(newSession.id)
-        await window.api.sessionSave(newSession)
+    if (!snap) return
+    const target = tabsRef.current.find((t) => t.id === snap.id)
+    if (!target) return
+
+    const restored: Session = {
+      ...target,
+      text: snap.text,
+      title: snap.title,
+      updatedAt: Date.now()
+    }
+    const nextTabs = tabsRef.current.map((t) => (t.id === restored.id ? restored : t))
+    tabsRef.current = nextTabs
+    setTabs(nextTabs)
+    userEditedTabIdsRef.current.delete(restored.id)
+    if (restored.source !== 'clipboard-watch' || saveWatchedRef.current) {
+      await window.api.sessionSave(restored)
+    }
+  }, [])
+
+  const handleLiveEditChange = useCallback((rawText: string): void => {
+    // Edit-mode sync applies steps 1 and 2 (line endings + NUL) per §6.5 cleanly without cursor jump
+    const normalized = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\x00/g, '')
+    const current = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
+
+    let updated: Session
+    let nextTabs: Session[]
+
+    if (current) {
+      updated = {
+        ...current,
+        text: normalized,
+        title: normalized.trim() ? makeTitle(normalized) : (current.source === 'typed' ? 'New tab' : 'Untitled'),
+        updatedAt: Date.now()
       }
-    },
-    [currentSession]
-  )
+      nextTabs = tabsRef.current.map((t) => (t.id === updated.id ? updated : t))
+    } else {
+      updated = {
+        id: newUuid(),
+        title: normalized.trim() ? makeTitle(normalized) : 'New tab',
+        source: 'typed',
+        text: normalized,
+        sentenceIndex: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }
+      nextTabs = [...tabsRef.current, updated]
+      activeTabIdRef.current = updated.id
+      setActiveTabId(updated.id)
+    }
+
+    userEditedTabIdsRef.current.add(updated.id)
+    tabsRef.current = nextTabs
+    setTabs(nextTabs)
+    pendingEditSessionRef.current = updated
+
+    if (editSaveTimer.current) clearTimeout(editSaveTimer.current)
+    editSaveTimer.current = setTimeout(() => {
+      editSaveTimer.current = null
+      const pending = pendingEditSessionRef.current
+      if (pending) {
+        pendingEditSessionRef.current = null
+        if (pending.source !== 'clipboard-watch' || saveWatchedRef.current) {
+          void window.api.sessionSave(pending)
+        }
+      }
+    }, 300)
+  }, [])
 
   // Save session 500ms after sentenceIndex last changed (§7.4)
   const handleSentenceChange = useCallback(
@@ -780,21 +940,27 @@ export default function App(): ReactElement {
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
-      setTabs((prev) => {
-        const idx = prev.findIndex((t) => t.id === tabId)
-        const nextTabs = prev.filter((t) => t.id !== tabId)
-        if (activeTabId === tabId) {
-          const fallback = nextTabs[Math.min(idx, nextTabs.length - 1)] ?? null
-          setActiveTabId(fallback?.id ?? null)
-          setIsEditing(false)
-        }
-        return nextTabs
-      })
+      flushPendingEditSave()
+      userEditedTabIdsRef.current.delete(tabId)
+      const list = tabsRef.current
+      const idx = list.findIndex((t) => t.id === tabId)
+      const nextTabs = list.filter((t) => t.id !== tabId)
+      tabsRef.current = nextTabs
+      setTabs(nextTabs)
+      if (activeTabIdRef.current === tabId) {
+        const fallback = nextTabs[Math.min(idx, nextTabs.length - 1)] ?? null
+        activeTabIdRef.current = fallback?.id ?? null
+        setActiveTabId(fallback?.id ?? null)
+        editSnapshotRef.current = null
+        setIsEditing(false)
+      }
     },
-    [activeTabId]
+    [flushPendingEditSave]
   )
 
   const handleNewBlankTab = useCallback(() => {
+    flushPendingEditSave()
+    editSnapshotRef.current = null
     const blank: Session = {
       id: newUuid(),
       title: 'New tab',
@@ -805,10 +971,13 @@ export default function App(): ReactElement {
       updatedAt: Date.now()
     }
     if (activeTabId) setPreviousSessionId(activeTabId)
-    setTabs((prev) => [...prev, blank])
+    const nextTabs = [...tabsRef.current, blank]
+    tabsRef.current = nextTabs
+    setTabs(nextTabs)
+    activeTabIdRef.current = blank.id
     setActiveTabId(blank.id)
     setIsEditing(false)
-  }, [activeTabId])
+  }, [activeTabId, flushPendingEditSave])
 
   // Drag and drop handlers
   const handleDrop = useCallback(
@@ -898,7 +1067,6 @@ export default function App(): ReactElement {
 
   const shouldShowToolbar =
     windowHeight >= 100 &&
-    !isEditing &&
     (settings.toolbarMode === 'always' || (settings.toolbarMode === 'hover' && showToolbar))
 
   return (
@@ -963,12 +1131,16 @@ export default function App(): ReactElement {
         {shouldShowToolbar && (
           <Toolbar
             locked={settings.locked}
+            isEditing={isEditing}
             readingMode={settings.readingMode}
             onCycleMode={handleCycleMode}
-            onTogglePrompt={() => setShowPromptBar((v) => !v)}
+            onTogglePrompt={() => {
+              if (isEditing) exitEditMode()
+              setShowPromptBar((v) => !v)
+            }}
             onOpenFile={handleOpenFile}
             onImportClipboard={() => window.api.clipboardImport()}
-            onEdit={() => setIsEditing(true)}
+            onEdit={toggleEditMode}
             onToggleLock={handleToggleLock}
             onSettings={() => setShowSettings((v) => !v)}
             onHide={() => window.api.windowApply({ hidden: true })}
@@ -991,8 +1163,8 @@ export default function App(): ReactElement {
         )}
 
         {/* Tab strip for switching between multiple pasted/imported texts in one window */}
-        {tabs.length > 0 && windowHeight >= 100 && !isEditing && (
-          <div className="tab-bar">
+        {tabs.length > 0 && windowHeight >= 100 && (
+          <div className="tab-bar" ref={tabBarRef}>
             {tabs.map((tab) => {
               const isActive = tab.id === activeTabId
               const isTabStreaming = streamingSessionIds.includes(tab.id)
@@ -1000,12 +1172,7 @@ export default function App(): ReactElement {
                 <div
                   key={tab.id}
                   className={`tab-item${isActive ? ' active' : ''}${isTabStreaming ? ' streaming' : ''}`}
-                  onClick={() => {
-                    if (tab.id !== activeTabId) {
-                      if (activeTabId) setPreviousSessionId(activeTabId)
-                      setActiveTabId(tab.id)
-                    }
-                  }}
+                  onClick={() => switchToTab(tab.id)}
                   title={tab.title || 'Untitled'}
                 >
                   <span className="tab-title">{tab.title || 'Untitled'}</span>
@@ -1035,57 +1202,94 @@ export default function App(): ReactElement {
           </div>
         )}
 
-        {/* Reader or edit textarea */}
+        {/* Reader or live dynamic edit textarea */}
         {isEditing ? (
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
             <div className="edit-bar">
-              <span>Editing script</span>
+              <span>Live editing · auto-saved</span>
               <div className="edit-bar-actions">
-                <button
-                  type="button"
-                  className="sp-btn"
-                  onClick={() => setIsEditing(false)}
-                  title="Cancel (Esc)"
-                >
-                  Cancel
-                </button>
+                {editSnapshotRef.current && (
+                  <button
+                    type="button"
+                    className="sp-btn"
+                    onClick={() => void revertEditMode()}
+                    title="Revert changes made in this edit session"
+                  >
+                    Revert
+                  </button>
+                )}
                 <button
                   type="button"
                   className="sp-btn accent"
-                  onClick={() => handleEditSave(editTextareaRef.current?.value ?? text)}
-                  title="Save changes (Ctrl+Enter)"
+                  onClick={exitEditMode}
+                  title="Done editing (Ctrl+Enter / Esc)"
                 >
-                  Save  Ctrl+Enter
+                  Done
                 </button>
               </div>
             </div>
             <textarea
+              key={currentSession?.id ?? 'new'}
               ref={editTextareaRef}
               className="edit-textarea"
-              defaultValue={text}
+              value={text}
+              placeholder="Type or paste your script here..."
               autoFocus
               style={{ flex: 1, minHeight: 0 }}
+              onChange={(e) => handleLiveEditChange(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && e.ctrlKey) {
-                  handleEditSave((e.target as HTMLTextAreaElement).value)
-                }
-                if (e.key === 'Escape') {
-                  setIsEditing(false)
+                if ((e.key === 'Enter' && e.ctrlKey) || e.key === 'Escape') {
+                  e.preventDefault()
+                  exitEditMode()
                 }
               }}
             />
+            {tabs.length > 0 && windowHeight >= 72 && (
+              <div className="reader-nav-bar">
+                <div className="reader-nav-left">
+                  <button
+                    type="button"
+                    className="reader-nav-btn"
+                    aria-label="Previous answer"
+                    title="Previous answer"
+                    disabled={currentTabIndex <= 0}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => stepAnswer(-1)}
+                  >
+                    ←
+                  </button>
+                  <span className="reader-nav-count" title="Current / Total answers">
+                    {currentTabIndex >= 0 ? `${currentTabIndex + 1} / ${tabs.length}` : '0 / 0'}
+                  </span>
+                  <button
+                    type="button"
+                    className="reader-nav-btn"
+                    aria-label="Next answer"
+                    title="Next answer"
+                    disabled={currentTabIndex < 0 || currentTabIndex >= tabs.length - 1}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => stepAnswer(1)}
+                  >
+                    →
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <Reader
             text={text}
             settings={settings}
             currentSession={currentSession}
+            tabIndex={currentTabIndex}
+            tabCount={tabs.length}
             isStreaming={
               Boolean(currentSession && streamingSessionIds.includes(currentSession.id)) ||
               (isAiStreaming && activeAiStreamRef.current?.sessionId === currentSession?.id)
             }
             commandEvent={commandEvent}
             onSentenceChange={handleSentenceChange}
+            onStepAnswer={stepAnswer}
             onSettingsChange={handleSettingsChange}
           />
         )}

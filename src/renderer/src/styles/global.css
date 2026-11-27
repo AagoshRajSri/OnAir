@@ -329,6 +329,17 @@ body,
   background: rgba(255, 255, 255, 0.09);
 }
 
+/* Active edit mode toggle */
+.toolbar button.active-edit {
+  color: var(--ui-blue);
+  background: rgba(96, 165, 250, 0.16);
+}
+
+.toolbar button.active-edit:hover {
+  color: var(--ui-blue);
+  background: rgba(96, 165, 250, 0.24);
+}
+
 /* Toolbar icon */
 .tb-icon {
   width: 13px;
@@ -339,7 +350,8 @@ body,
 
 .toolbar button:hover .tb-icon,
 .toolbar button.active-lock .tb-icon,
-.toolbar button.active-mode .tb-icon {
+.toolbar button.active-mode .tb-icon,
+.toolbar button.active-edit .tb-icon {
   opacity: 1;
 }
 
@@ -628,14 +640,9 @@ textarea {
   user-select: text;
 }
 
-/* ─── Sentence highlighting ───────────────────────────────────────────────── */
+/* ─── Sentence highlighting (unused in full-answer flow view) ────────────── */
 .sentence-span {
   transition: background 80ms ease;
-}
-
-.sentence-span.active {
-  background: rgba(255, 255, 255, 0.09);
-  border-radius: 2px;
 }
 
 /* ─── Bottom navigation bar ───────────────────────────────────────────────── */

@@ -11,6 +11,7 @@ const CLAUDE_IGNORE_SELECTORS = [
 ]
 
 const DOCUMENT_POSITION_FOLLOWING = 4
+const stableClaudeTurnIds = new WeakMap<Element, string>()
 
 export function matchesLocation(locationLike: Pick<Location, 'origin'>): boolean {
   return locationLike.origin === 'https://claude.ai'
@@ -57,8 +58,14 @@ export function getLatestReply(root: Document): ExtractedReply | null {
     )
     if (replyNodes.length === 0) return null
 
-    const convPath = root.location?.pathname || 'chat'
-    id = `claude-${convPath}-turn-${userTurns.length}`
+    const cached = stableClaudeTurnIds.get(lastUser)
+    if (cached) {
+      id = cached
+    } else {
+      const convPath = root.location?.pathname || 'chat'
+      id = `claude-${convPath}-turn-${userTurns.length}`
+      stableClaudeTurnIds.set(lastUser, id)
+    }
   } else {
     const turnIndex = allAssistantNodes.length - 1
     const msgEl = allAssistantNodes[turnIndex]

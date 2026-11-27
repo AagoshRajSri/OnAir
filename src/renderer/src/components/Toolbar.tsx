@@ -3,6 +3,7 @@ import type { ReadingMode } from '../../../shared/types'
 
 interface ToolbarProps {
   locked: boolean
+  isEditing: boolean
   readingMode: ReadingMode
   onCycleMode: () => void
   onTogglePrompt: () => void
@@ -125,6 +126,7 @@ function IconEye(): ReactElement {
 
 export default function Toolbar({
   locked,
+  isEditing,
   readingMode,
   onCycleMode,
   onTogglePrompt,
@@ -150,9 +152,13 @@ export default function Toolbar({
         <span className="tb-label">Paste</span>
       </button>
 
-      <button onClick={onEdit} title="Edit text  Ctrl+E">
+      <button
+        onClick={onEdit}
+        className={isEditing ? 'active-edit' : ''}
+        title={isEditing ? 'Finish editing  Ctrl+E' : 'Edit text  Ctrl+E'}
+      >
         <IconEdit />
-        <span className="tb-label">Edit</span>
+        <span className="tb-label">{isEditing ? 'Done' : 'Edit'}</span>
       </button>
 
       <button onClick={onTogglePrompt} title="Quick AI prompt  Ctrl+Alt+P">

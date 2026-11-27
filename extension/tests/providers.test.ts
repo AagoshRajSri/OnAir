@@ -301,4 +301,75 @@ describe('Content Mirror Controller (Throttle, Seq, Streaming & Idle Finalize)',
 
     controller.stop()
   })
+
+  it('keeps stable answer ID across mid-turn URL updates on ChatGPT and Claude while allocating new IDs for subsequent answers', () => {
+    const cgDom = new JSDOM(
+      `<!doctype html><html><body><main>
+        <div data-message-author-role="user">Question one</div>
+        <div data-markdown-text-style="assistant-message" data-markdown-animated=""><p>Answer one chunk</p></div>
+      </main></body></html>`,
+      { url: 'https://chatgpt.com/' }
+    )
+    const cgDoc = cgDom.window.document
+    const firstCg = getChatgptLatestReply(cgDoc)
+    expect(firstCg).not.toBeNull()
+
+    // ChatGPT transitions URL from "/" to "/c/<uuid>" while Answer 1 settles
+    cgDom.reconfigure({ url: 'https://chatgpt.com/c/6927-uuid' })
+    const settledCg = getChatgptLatestReply(cgDoc)
+    expect(settledCg?.id).toBe(firstCg?.id)
+
+    // Subsequent question opens a brand new ID
+    const cgMain = cgDoc.querySelector('main')!
+    const u2 = cgDoc.createElement('div')
+    u2.setAttribute('data-message-author-role', 'user')
+    u2.textContent = 'Question two'
+    const a2 = cgDoc.createElement('div')
+    a2.setAttribute('data-markdown-text-style', 'assistant-message')
+    a2.innerHTML = '<p>Answer two</p>'
+    cgMain.append(u2, a2)
+    const secondCg = getChatgptLatestReply(cgDoc)
+    expect(secondCg?.id).not.toBe(firstCg?.id)
+
+    const claudeDom = new JSDOM(
+      `<!doctype html><html><body><main>
+        <div data-testid="user-message">Prompt one</div>
+        <div data-testid="assistant-message" data-is-streaming="true"><div data-cds="Prose"><div class="standard-markdown"><p>Claude chunk</p></div></div></div>
+      </main></body></html>`,
+      { url: 'https://claude.ai/new' }
+    )
+    const firstClaude = getClaudeLatestReply(claudeDom.window.document)
+    claudeDom.reconfigure({ url: 'https://claude.ai/chat/abc-uuid' })
+    const settledClaude = getClaudeLatestReply(claudeDom.window.document)
+    expect(settledClaude?.id).toBe(firstClaude?.id)
+  })
+
+  it('re-emits the latest reply cleanly when re-enabled after stop() or triggered via syncNow(true)', () => {
+    const doc = loadFixture('chatgpt.html')
+    const sent: ContentBridgeMessage[] = []
+    const controller = createMirrorController({
+      adapter: chatgptAdapter,
+      doc,
+      sendMessage: (msg) => sent.push(msg),
+      now: () => 100,
+      epochNow: () => 1000
+    })
+
+    controller.start()
+    expect(sent).toHaveLength(1)
+    expect(sent[0].seq).toBe(1)
+
+    // Manual resend via syncNow(true) bumps seq even without DOM mutation
+    const synced = controller.syncNow(true)
+    expect(synced?.id).toBe('chatgpt-_r_00_')
+    expect(sent).toHaveLength(2)
+    expect(sent[1].seq).toBe(2)
+
+    // Toggling off and back on re-emits with strictly higher seq
+    controller.stop()
+    controller.start()
+    expect(sent).toHaveLength(3)
+    expect(sent[2].seq).toBe(3)
+    controller.stop()
+  })
 })
