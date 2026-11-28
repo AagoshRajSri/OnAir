@@ -16,6 +16,7 @@ interface RsvpViewProps {
   cursorHideOnPlay?: boolean
   commandEvent: { cmd: ShortcutId; seq: number } | null
   onWpmChange: (nextWpm: number) => void
+  onPlayingChange?: (playing: boolean) => void
   onWheel?: (e: React.WheelEvent) => void
 }
 
@@ -35,6 +36,7 @@ export default function RsvpView({
   cursorHideOnPlay = false,
   commandEvent,
   onWpmChange,
+  onPlayingChange,
   onWheel
 }: RsvpViewProps): ReactElement {
   const tokens = useMemo(() => tokenizeRsvp(text), [text])
@@ -48,6 +50,7 @@ export default function RsvpView({
   const playingRef = useRef(false)
   const wpmRef = useRef(wpm)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastHandledCmdSeqRef = useRef(0)
   const nextDueRef = useRef(0)
   const scheduledFlipAtRef = useRef<number | null>(null)
   const prevSessionIdRef = useRef<string | null>(sessionId)
@@ -173,6 +176,10 @@ export default function RsvpView({
   }, [wordIndex])
 
   useEffect(() => {
+    onPlayingChange?.(isPlaying)
+  }, [isPlaying, onPlayingChange])
+
+  useEffect(() => {
     playingRef.current = isPlaying
     if (isPlaying) {
       if (wordIndexRef.current >= tokens.length - 1 && tokens.length > 1) {
@@ -213,9 +220,10 @@ export default function RsvpView({
     [onWpmChange]
   )
 
-  // Global shortcut commands forwarded from App
+  // Global shortcut / dock commands forwarded from App (deduped by seq)
   useEffect(() => {
-    if (!commandEvent) return
+    if (!commandEvent || commandEvent.seq === lastHandledCmdSeqRef.current) return
+    lastHandledCmdSeqRef.current = commandEvent.seq
     switch (commandEvent.cmd) {
       case 'toggleScroll':
         togglePlay()

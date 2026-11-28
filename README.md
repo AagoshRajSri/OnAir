@@ -126,7 +126,7 @@ npm run lint
 # Run TypeScript type check across all targets (app, node, extension)
 npm run typecheck
 
-# Run full Vitest test suite (100 tests)
+# Run full Vitest test suite (101 tests)
 npm test
 
 # Build production bundles
@@ -213,7 +213,7 @@ Measured directly on the packaged Electron build (`dist/win-unpacked/OnAir.exe`)
 
 ## Test Coverage Summary
 
-OnAir maintains **100 automated tests across 14 test suites** (100% passing):
+OnAir maintains **101 automated tests across 14 test suites** (100% passing):
 
 1. **`tests/normalize.test.ts`** (10 tests): CRLF/CR normalization, NUL stripping, trailing whitespace trimming, newline collapsing, edit mode constraints.
 2. **`tests/storage.test.ts`** (8 tests): Session history pruning, 7-day retention limit, 20-session cap, sort order integrity, default settings (`streamOnlyNew`, `autoScrollOnStream`, `alwaysOpenAtTopCenter`, `defaultBounds`).
@@ -227,5 +227,5 @@ OnAir maintains **100 automated tests across 14 test suites** (100% passing):
 10. **`tests/rsvp.test.ts`** (5 tests): ORP index buckets (`1..14+`), punctuation-aware lossless splitting, pause multipliers (`1.5×`, `2.2×`, `2.8×`), 300 WPM timing accuracy (50 words in 10 s).
 11. **`tests/bionic.test.ts`** (4 tests): Prefix length calculation, strength clamping, lossless reconstruction across newlines/punctuation.
 12. **`tests/sse-parser.test.ts`** (8 tests): Split multi-byte UTF-8 / TCP chunk boundaries, `[DONE]` & provider SSE/NDJSON parsers, 16 ms coalescing, HTTP 401/429 error toasts, mid-stream `AbortController` cancellation, localhost-only Ollama URL validation.
-13. **`tests/optics-reflow.test.ts`** (8 tests): Smart PDF/copy soft-wrap recovery (`reflowWrappedText`), heading & `Key: Value` preservation, speech duration telemetry, viewport-responsive & compact optical font scaling (`computeStageOptics`), dark-polarity tracking, dynamic RSVP sizing, and `AutoScroller` frame clamping.
+13. **`tests/optics-reflow.test.ts`** (9 tests): Smart PDF/copy soft-wrap recovery (`reflowWrappedText`), heading & `Key: Value` preservation, speech duration telemetry, viewport-responsive & compact optical font scaling (`computeStageOptics`), dark-polarity tracking, dynamic RSVP sizing, and `AutoScroller` frame clamping & streaming overflow lifecycle.
 14. **`tests/window-bounds.test.ts`** (3 tests): Camera top-center placement (`computeTopCenterBounds`), secondary monitor workArea clamping, and custom `defaultBounds` resolution (`resolveDefaultBounds`).

@@ -2002,7 +2002,8 @@ textarea {
   cursor: default;
 }
 
-.ext-dock-btn.active-lock {
+.ext-dock-btn.active-lock,
+.ext-dock-btn.active-scroll {
   color: var(--ui-accent);
   background: var(--ui-accent-dim);
 }

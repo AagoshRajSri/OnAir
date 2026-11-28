@@ -161,5 +161,68 @@ describe('AutoScroller stability & sub-pixel continuity', () => {
 
     scroller.stop()
   })
+
+  it('stays alive during streaming before overflow, scrolls as content grows, and finishes after stream ends', () => {
+    let fakeNow = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => fakeNow)
+    let rafQueue: Array<(ts: number) => void> = []
+    vi.stubGlobal('requestAnimationFrame', (cb: (ts: number) => void) => {
+      rafQueue.push(cb)
+      return rafQueue.length
+    })
+    vi.stubGlobal('cancelAnimationFrame', () => {
+      rafQueue = []
+    })
+
+    let rawTop = 0
+    let scrollHeight = 80
+    const clientHeight = 100
+    const container = {
+      get scrollHeight() {
+        return scrollHeight
+      },
+      get clientHeight() {
+        return clientHeight
+      },
+      get scrollTop() {
+        return rawTop
+      },
+      set scrollTop(v: number) {
+        const max = Math.max(0, scrollHeight - clientHeight)
+        rawTop = Math.max(0, Math.min(max, v))
+      }
+    } as unknown as HTMLElement
+
+    let ended = false
+    const scroller = new AutoScroller()
+    scroller.setStreaming(true)
+    scroller.start(container, 100, () => {
+      ended = true
+    })
+
+    // Before text overflows, scroller stays alive without firing onEnd
+    fakeNow = 20
+    rafQueue.shift()!(20)
+    expect(ended).toBe(false)
+    expect(scroller.isRunning()).toBe(true)
+
+    // Streamed LLM chunks cause overflow -> scroller advances smoothly
+    scrollHeight = 160
+    fakeNow = 70
+    rafQueue.shift()!(70) // +50ms * 100px/s = +5px
+    expect(container.scrollTop).toBeGreaterThan(0)
+
+    // Stream finishes before bottom -> scroller keeps running to maxScroll then calls onEnd
+    scroller.setStreaming(false)
+    expect(ended).toBe(false)
+    for (let t = 120; t <= 900 && !ended; t += 50) {
+      fakeNow = t
+      const cb = rafQueue.shift()
+      if (!cb) break
+      cb(t)
+    }
+    expect(ended).toBe(true)
+    expect(container.scrollTop).toBe(60)
+  })
 })
 

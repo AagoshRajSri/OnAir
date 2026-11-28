@@ -53,6 +53,7 @@ interface ReaderProps {
   onSentenceChange: (index: number) => void
   onStepAnswer: (delta: -1 | 1) => void
   onSettingsChange: (patch: Partial<Settings>) => void
+  onScrollingChange?: (scrolling: boolean) => void
 }
 
 export default function Reader({
@@ -67,7 +68,8 @@ export default function Reader({
   commandEvent,
   onSentenceChange,
   onStepAnswer,
-  onSettingsChange
+  onSettingsChange,
+  onScrollingChange
 }: ReaderProps): ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const progressFillRef = useRef<HTMLDivElement>(null)
@@ -81,6 +83,7 @@ export default function Reader({
   const scrollEdgesRef = useRef(scrollEdges)
   const scrollerRef = useRef(new AutoScroller())
   const savedScrollTopRef = useRef(0)
+  const lastHandledCmdSeqRef = useRef(0)
   const prevSessionKeyRef = useRef<string>(
     `${currentSession?.id ?? ''}:${currentSession?.createdAt ?? 0}:${currentSession?.bridgeMessageId ?? ''}`
   )
@@ -348,13 +351,23 @@ export default function Reader({
     scrollerRef.current.setSpeed(settings.autoScrollSpeed)
     scrollerRef.current.setLoop(settings.autoScrollLoop)
     scrollerRef.current.setStreaming(isStreaming)
-  }, [settings.autoScrollSpeed, settings.autoScrollLoop, isStreaming])
+    if (!settings.pauseScrollOnHover) {
+      scrollerRef.current.setHoverPaused(false)
+    }
+  }, [settings.autoScrollSpeed, settings.autoScrollLoop, settings.pauseScrollOnHover, isStreaming])
+
+  useEffect(() => {
+    onScrollingChange?.(settings.readingMode === 'rsvp' ? false : scrolling)
+  }, [scrolling, settings.readingMode, onScrollingChange])
 
   // Cleanup autoscroller RAF on unmount
   useEffect(() => {
     const scroller = scrollerRef.current
-    return () => scroller.stop()
-  }, [])
+    return () => {
+      scroller.stop()
+      onScrollingChange?.(false)
+    }
+  }, [onScrollingChange])
 
   // Stop scrolling automatically if switched to RSVP, Page mode, or cleared text
   useEffect(() => {
@@ -404,9 +417,10 @@ export default function Reader({
     [settings.autoScrollSpeed, onSettingsChange]
   )
 
-  // Handle global shortcut commands forwarded from App
+  // Handle global shortcut / dock commands forwarded from App (deduped by seq so state updates don't re-fire)
   useEffect(() => {
-    if (!commandEvent) return
+    if (!commandEvent || commandEvent.seq === lastHandledCmdSeqRef.current) return
+    lastHandledCmdSeqRef.current = commandEvent.seq
     switch (commandEvent.cmd) {
       case 'nextSentence':
         if (settings.pageMode) stepSentence(1)
@@ -541,6 +555,7 @@ export default function Reader({
         cursorHideOnPlay={settings.cursorHideOnPlay}
         commandEvent={commandEvent}
         onWpmChange={(nextWpm) => onSettingsChange({ rsvpWpm: nextWpm })}
+        onPlayingChange={onScrollingChange}
         onWheel={handleWheel}
       />
     )

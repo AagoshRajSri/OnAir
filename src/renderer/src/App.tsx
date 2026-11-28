@@ -112,6 +112,7 @@ export default function App(): ReactElement {
   const [streamingSessionIds, setStreamingSessionIds] = useState<string[]>([])
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
+  const [isReaderScrolling, setIsReaderScrolling] = useState(false)
   const [commandEvent, setCommandEvent] = useState<{ cmd: ShortcutId; seq: number } | null>(null)
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({
     state: 'stopped',
@@ -1432,6 +1433,7 @@ export default function App(): ReactElement {
             onSentenceChange={handleSentenceChange}
             onStepAnswer={stepAnswer}
             onSettingsChange={handleSettingsChange}
+            onScrollingChange={setIsReaderScrolling}
           />
         )}
 
@@ -1545,15 +1547,16 @@ export default function App(): ReactElement {
             {!settings.pageMode && (
               <button
                 type="button"
-                className="ext-dock-btn"
-                aria-label="Toggle scroll"
-                title="Play / Pause scroll (Space)"
+                className={`ext-dock-btn${isReaderScrolling ? ' active-scroll' : ''}`}
+                aria-label={isReaderScrolling ? 'Pause scroll' : 'Play scroll'}
+                title={isReaderScrolling ? 'Pause scroll (Space)' : 'Play scroll (Space)'}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   cmdSeq.current += 1
                   setCommandEvent({ cmd: 'toggleScroll', seq: cmdSeq.current })
                 }}
               >
-                ⏯
+                {isReaderScrolling ? '⏸' : '▶'}
               </button>
             )}
           </div>
