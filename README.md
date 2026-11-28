@@ -8,10 +8,12 @@
 
 ### Floating Frameless Reader (Phase 1)
 - **Always on top**: Runs at `screen-saver` level so it stays visible during presentations and screen shares (`setContentProtection` is never used).
-- **Frameless transparent window**: Supports DPI-aware custom 8-edge/corner resizing (down to `180×110` including the bottom-left exterior drag gutter) and compositor alpha opacity (`--win-opacity`).
+- **Frameless shadowless transparent window**: Supports DPI-aware custom 8-edge/corner resizing (down to `180×110` including the bottom-left exterior drag gutter) and compositor alpha opacity (`--win-opacity`) with a clean shadowless card.
+- **Camera top-center & custom default bounds**: First-run placement centers the visible card below the webcam flush with the top edge (`computeTopCenterBounds`). Includes a **Snap** (`Top`) quick button, **Use Current** capture, editable custom `W`/`H`/`X`/`Y` default bounds, **Reset**, and **Always open at default location & size** on launch (preserving current window size when no custom default is saved).
+- **Unobstructed compact mode**: When resized below `320×200` (down to `180×110`), top chrome collapses into a hover overlay and navigation/snap/lock/settings controls shift to exterior side and bottom docks outside the card so the teleprompter text stays clear.
 - **Drag & lock controls**: Dedicated 10 px top drag strip + exterior circular drag handle, with position Lock (`Ctrl+Alt+L`) pinning always-on-top while keeping drag and resize active.
 - **Configurable toolbar**: 32 px toolbar supporting `Hover`, `Always`, and `Minimal` visibility modes (auto-collapsed below `100 px` height).
-- **Native Windows context menu**: Right-click menu with Cut, Copy, Paste, Select All, File/Clipboard import, Page mode, Lock, Hide, Settings, and Quit.
+- **Native Windows context menu**: Right-click menu with Cut, Copy, Paste, Select All, File/Clipboard import, Page mode, Snap to default, Save current size & location, Lock, Hide, Settings, and Quit.
 - **Window size presets**: Column (398×678), Compact (438×438), Wide (938×398), and Stage (1280×720).
 - **State persistence**: Remembers window position and dimensions across restarts with disconnected multi-monitor overlap recovery.
 
@@ -34,7 +36,7 @@
 ### Reading, Tabs & Navigation
 - **Multi-tab answer workspace**: Each imported document or mirrored answer can open in its own tab (`Ctrl+Alt+V`, file import, or OnAir Bridge); optional **Open last pasted item on startup** setting (default launches a clean blank `New tab`).
 - **Prev/Next navigation**: Step between previous/next answers via the bottom navigation arrows (`←` / `→`), or toggle **Page-by-page view** (`Intl.Segmenter` sentence spans `<span data-i="n">` with `15%` highlight tint).
-- **Continuous auto-scrolling**: `requestAnimationFrame`-driven smooth scrolling (`10–400 px/s`, default `60 px/s`) with manual scroll interception, hover pause, optional loop, and end-of-text banner.
+- **Continuous auto-scrolling**: `requestAnimationFrame`-driven smooth scrolling (`10–400 px/s`, default `60 px/s`) with clamped frame steps (`<= 50 ms`), manual scroll interception, hover pause, optional **Auto-scroll on LLM stream** (`autoScrollOnStream`), loop, and end-of-text banner.
 
 ### Input, Live Editing & File Importers
 - **Live dynamic edit mode**: Toggle inline editing (`Ctrl+E` or toolbar **Edit**) with live auto-save across tab switches, **Revert** snapshot recovery, and `Ctrl+Enter` / `Esc` exit.
@@ -65,8 +67,9 @@
   - Universal right-click **"Send to reader"** context menu (`contexts: ["selection"]`) allows sending highlighted text from any website without requiring elevated permissions.
   - Per-tab mirroring toggle stored in `chrome.storage.session`.
 - **In-Place Dynamic Streaming**:
-  - Updates matching active `bridgeId` replace text in-place, preserving user `scrollTop` and clamping `sentenceIndex` dynamically if text length shrinks.
+  - Updates matching active `bridgeId` replace text in-place via `requestAnimationFrame`-coalesced updates, preserving user `scrollTop` and clamping `sentenceIndex` dynamically if text length shrinks.
   - New bridge IDs automatically create clean separate sessions.
+  - **Stream only new answers** (`streamOnlyNew` fresh-start mode) skips already-settled chat replies when enabling mirroring so only newly arriving answers stream to OnAir.
 - **Settings UI**:
   - Dedicated Browser Bridge section displaying live bridge status (`Listening (47821 · 1 active)` / `Port in use`), editable port, Extension ID input, and a copyable/regenerable 64-char pairing token.
 
@@ -102,6 +105,8 @@
 | **API Key Storage** | DPAPI encrypted | Secrets encrypted at rest in `userData/secrets.enc` via `safeStorage`; renderer only queries `secretsHasKey` boolean |
 | **Screen Capture** | Always visible | Content protection / capture-hiding APIs are **never** used; window remains visible in screen shares |
 
+*Live runtime verification (`netstat` + `ws` client probes on `127.0.0.1:47821`): confirmed loopback-only `LISTENING` socket owned by `OnAir.exe` and `1008` policy rejection for foreign `Origin`, missing pairing token, and invalid handshake.*
+
 ---
 
 ## Development & Testing
@@ -121,13 +126,13 @@ npm run lint
 # Run TypeScript type check across all targets (app, node, extension)
 npm run typecheck
 
-# Run full Vitest test suite (94 tests)
+# Run full Vitest test suite (100 tests)
 npm test
 
 # Build production bundles
 npm run build
 
-# Package Windows NSIS Installer (dist/OnAir Setup 1.0.0.exe)
+# Package Windows NSIS Installer (dist/OnAir Setup 1.0.1.exe)
 npm run build:win
 ```
 
@@ -208,18 +213,19 @@ Measured directly on the packaged Electron build (`dist/win-unpacked/OnAir.exe`)
 
 ## Test Coverage Summary
 
-OnAir maintains **94 automated tests across 13 test suites** (100% passing):
+OnAir maintains **100 automated tests across 14 test suites** (100% passing):
 
 1. **`tests/normalize.test.ts`** (10 tests): CRLF/CR normalization, NUL stripping, trailing whitespace trimming, newline collapsing, edit mode constraints.
-2. **`tests/storage.test.ts`** (8 tests): Session history pruning, 7-day retention limit, 20-session cap, sort order integrity, default settings.
+2. **`tests/storage.test.ts`** (8 tests): Session history pruning, 7-day retention limit, 20-session cap, sort order integrity, default settings (`streamOnlyNew`, `autoScrollOnStream`, `alwaysOpenAtTopCenter`, `defaultBounds`).
 3. **`tests/themes.test.ts`** (4 tests): WCAG AAA contrast ratio mathematical verification for all presets (Obsidian, Slate, OLED Black $\ge 18:1$).
 4. **`tests/metrics.test.ts`** (4 tests): Trial counter persistence across restarts, metric file parsing, disabled state handling, Phase 3 local vs AI metric recording.
 5. **`tests/sentences.test.ts`** (11 tests): `Intl.Segmenter` splitting, paragraph indexing, directional paragraph navigation, sentence clamping on text shrinkage.
-6. **`tests/bridge.test.ts`** (6 tests): Port & token generation, timing-safe auth, close code 1008 rejection cases, seq ordering, ping/pong, EADDRINUSE resilience.
+6. **`tests/bridge.test.ts`** (7 tests): Port & token generation, timing-safe auth, close code 1008 rejection cases, seq ordering, ping/pong, `EADDRINUSE` resilience, `streamOnlyNew` config sync.
 7. **`tests/importers.test.ts`** (8 tests): UTF-8 BOM, Windows-1252, selectable PDF extraction, scanned PDF detection, DOCX extraction, oversized file rejection (>10 MB).
-8. **`extension/tests/providers.test.ts`** (13 tests): ChatGPT & Claude DOM adapters against HTML fixtures, streaming indicator detection, 50 ms leading/trailing throttle controller, 1500 ms idle finalization fallback, `syncNow()` & re-enable `seq` monotonic emission.
+8. **`extension/tests/providers.test.ts`** (14 tests): ChatGPT & Claude DOM adapters against HTML fixtures, streaming indicator detection, 50 ms leading/trailing throttle controller, 1500 ms idle finalization fallback, `syncNow()`, re-enable `seq` monotonic emission, and `streamOnlyNew` filtering.
 9. **`tests/secrets.test.ts`** (6 tests): Phase 3 default contracts, DPAPI `safeStorage` round-trip, zero plaintext on disk (`secrets.enc`), unavailability refusal, multi-provider deletion.
 10. **`tests/rsvp.test.ts`** (5 tests): ORP index buckets (`1..14+`), punctuation-aware lossless splitting, pause multipliers (`1.5×`, `2.2×`, `2.8×`), 300 WPM timing accuracy (50 words in 10 s).
 11. **`tests/bionic.test.ts`** (4 tests): Prefix length calculation, strength clamping, lossless reconstruction across newlines/punctuation.
 12. **`tests/sse-parser.test.ts`** (8 tests): Split multi-byte UTF-8 / TCP chunk boundaries, `[DONE]` & provider SSE/NDJSON parsers, 16 ms coalescing, HTTP 401/429 error toasts, mid-stream `AbortController` cancellation, localhost-only Ollama URL validation.
-13. **`tests/optics-reflow.test.ts`** (7 tests): Smart PDF/copy soft-wrap recovery (`reflowWrappedText`), heading & `Key: Value` preservation, speech duration telemetry, viewport-responsive optical font scaling (`computeStageOptics`), dark-polarity tracking, and dynamic RSVP sizing.
+13. **`tests/optics-reflow.test.ts`** (8 tests): Smart PDF/copy soft-wrap recovery (`reflowWrappedText`), heading & `Key: Value` preservation, speech duration telemetry, viewport-responsive & compact optical font scaling (`computeStageOptics`), dark-polarity tracking, dynamic RSVP sizing, and `AutoScroller` frame clamping.
+14. **`tests/window-bounds.test.ts`** (3 tests): Camera top-center placement (`computeTopCenterBounds`), secondary monitor workArea clamping, and custom `defaultBounds` resolution (`resolveDefaultBounds`).
