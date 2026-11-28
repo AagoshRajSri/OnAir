@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   reflowWrappedText,
   countWords,
@@ -6,6 +6,7 @@ import {
   formatDurationCompact
 } from '../src/renderer/src/lib/reflow'
 import { computeStageOptics, computeRsvpFontSize, isDarkColor } from '../src/renderer/src/lib/optics'
+import { AutoScroller } from '../src/renderer/src/lib/autoscroll'
 
 describe('Smart PDF / copy reflow (reflowWrappedText)', () => {
   it('heals mid-clause PDF line breaks while preserving headings and key-value rows', () => {
@@ -79,6 +80,13 @@ describe('Responsive Stage Optics (computeStageOptics)', () => {
     expect(tiny.effectiveFontSize).toBeGreaterThanOrEqual(14)
     expect(tiny.effectiveFontSize).toBeLessThan(28)
     expect(tiny.effectivePaddingX).toBeLessThanOrEqual(10)
+
+    // Even if user configured large desktop font size (42px), tiny floating card keeps >= ~3 vertical lines
+    const tinyLargePref = computeStageOptics(170, 95, { ...baseSettings, fontSize: 42 }, true)
+    expect(tinyLargePref.effectiveFontSize).toBeGreaterThanOrEqual(13)
+    expect(tinyLargePref.effectiveFontSize).toBeLessThanOrEqual(21)
+    expect(tinyLargePref.effectivePaddingX).toBeLessThanOrEqual(8)
+    expect(tinyLargePref.effectivePaddingY).toBeLessThanOrEqual(6)
   })
 
   it('respects responsiveScale=false with exact user fontSize', () => {
@@ -95,6 +103,63 @@ describe('Responsive Stage Optics (computeStageOptics)', () => {
     const rsvpNarrow = computeRsvpFontSize(220, 120, 28, true, 16)
     expect(rsvpWide).toBeGreaterThan(rsvpNarrow)
     expect(rsvpWide).toBeGreaterThanOrEqual(42)
+  })
+})
+
+describe('AutoScroller stability & sub-pixel continuity', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('accumulates sub-pixel increments smoothly despite integer scrollTop quantization and clamps frame spikes', () => {
+    let rafQueue: Array<(t: number) => void> = []
+    let fakeNow = 0
+    vi.stubGlobal('performance', { now: () => fakeNow })
+    vi.stubGlobal('requestAnimationFrame', (cb: (t: number) => void) => {
+      rafQueue.push(cb)
+      return rafQueue.length
+    })
+    vi.stubGlobal('cancelAnimationFrame', () => {
+      rafQueue = []
+    })
+
+    // Simulate Chromium integer scrollTop quantization (fractional values floor on readback)
+    let rawTop = 0
+    const container = {
+      scrollHeight: 500,
+      clientHeight: 100,
+      get scrollTop() {
+        return Math.floor(rawTop)
+      },
+      set scrollTop(v: number) {
+        rawTop = Math.max(0, Math.min(400, v))
+      }
+    } as unknown as HTMLElement
+
+    const scroller = new AutoScroller()
+    scroller.setStreaming(true)
+    scroller.start(container, 30, () => {}) // 30 px/s => 0.5px per 16.67ms frame
+
+    // Advance three 16.67ms frames (~0.5px/frame => ~1.5px total -> scrollTop advances smoothly > 0)
+    for (const t of [16.67, 33.34, 50.0]) {
+      fakeNow = t
+      const next = rafQueue.shift()!
+      next(t)
+    }
+    expect(container.scrollTop).toBe(1)
+
+    // A 300ms frame hiccup is clamped to 50ms (= 1.5px), avoiding sudden scroll leaps
+    fakeNow = 350.0
+    rafQueue.shift()!(350.0)
+    expect(container.scrollTop).toBe(3)
+
+    // Deliberate manual wheel scroll syncs position cleanly
+    container.scrollTop = 90
+    fakeNow = 366.67
+    rafQueue.shift()!(366.67)
+    expect(container.scrollTop).toBeGreaterThanOrEqual(90)
+
+    scroller.stop()
   })
 })
 

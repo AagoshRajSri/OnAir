@@ -15,6 +15,7 @@ export function isMetricsTrackingEnabled(): boolean {
 export class AutoScroller {
   private rafId: number | null = null
   private pos = 0
+  private lastAppliedScroll = 0
   private lastTimestamp = 0
   private container: HTMLElement | null = null
   private onEnd: (() => void) | null = null
@@ -47,6 +48,7 @@ export class AutoScroller {
     }
     if (this.container && this.rafId === null) {
       this.pos = this.container.scrollTop
+      this.lastAppliedScroll = this.pos
       this.lastTimestamp = performance.now()
       this.rafId = requestAnimationFrame(this.tick)
     }
@@ -64,6 +66,7 @@ export class AutoScroller {
     this.onEnd = onEnd
     this.onSmoothness = onSmoothness ?? null
     this.pos = container.scrollTop
+    this.lastAppliedScroll = this.pos
     this.lastTimestamp = performance.now()
     this.frameDeltas = []
     this.elapsedMs = 0
@@ -76,6 +79,7 @@ export class AutoScroller {
       this.rafId = null
     }
     this.hoverPaused = false
+    this.lastAppliedScroll = 0
     this.container = null
     this.frameDeltas = []
     this.elapsedMs = 0
@@ -93,7 +97,8 @@ export class AutoScroller {
     if (!this.container || this.hoverPaused) return
 
     const deltaMs = timestamp - this.lastTimestamp
-    const deltaSec = deltaMs / 1000
+    const stepMs = Math.min(50, Math.max(0, deltaMs))
+    const deltaSec = stepMs / 1000
     this.lastTimestamp = timestamp
 
     if (scrollMetricsEnabled && deltaMs > 0) {
@@ -112,27 +117,31 @@ export class AutoScroller {
       }
     }
 
-    // Sync if user scrolled manually (> 2px deviation)
+    const maxScroll = Math.max(0, this.container.scrollHeight - this.container.clientHeight)
     const currentScroll = this.container.scrollTop
-    const deviation = Math.abs(currentScroll - this.pos)
-    if (deviation > 2) {
+
+    // Sync only on deliberate external/manual scroll rather than DPI rounding or temporary maxScroll clamping
+    const clampedByMax = this.lastAppliedScroll > maxScroll && Math.abs(currentScroll - maxScroll) <= 3
+    if (!clampedByMax && Math.abs(currentScroll - this.lastAppliedScroll) > 3) {
       this.pos = currentScroll
     }
 
-    this.pos += this.speed * deltaSec
+    this.pos = Math.min(maxScroll, this.pos + this.speed * deltaSec)
     this.container.scrollTop = this.pos
+    this.lastAppliedScroll = this.container.scrollTop
 
-    const maxScroll = Math.max(0, this.container.scrollHeight - this.container.clientHeight)
-    if (this.pos >= maxScroll - 1) {
+    if (this.pos >= maxScroll - 0.5) {
       if (this.streaming) {
         this.pos = maxScroll
         this.container.scrollTop = this.pos
+        this.lastAppliedScroll = this.container.scrollTop
         this.rafId = requestAnimationFrame(this.tick)
         return
       }
       if (this.loop && maxScroll > 0) {
         this.pos = 0
         this.container.scrollTop = 0
+        this.lastAppliedScroll = 0
         this.lastTimestamp = performance.now()
         this.rafId = requestAnimationFrame(this.tick)
         return

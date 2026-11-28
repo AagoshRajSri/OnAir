@@ -63,11 +63,15 @@ export function computeStageOptics(
     }
   }
 
+  const isCompactW = safeW < 280
+  const isCompactH = safeH < 180
+  const minPadX = isCompactW ? 6 : Math.min(settings.padding, 10)
+  const minPadY = isCompactH ? 5 : Math.min(settings.padding, 8)
   const effectivePaddingX = Math.round(
-    clamp(safeW * 0.04, Math.min(settings.padding, 10), Math.max(settings.padding, 48))
+    clamp(safeW * (isCompactW ? 0.032 : 0.04), minPadX, Math.max(settings.padding, 48))
   )
   const effectivePaddingY = Math.round(
-    clamp(safeH * 0.075, Math.min(settings.padding, 8), Math.max(settings.padding, 36))
+    clamp(safeH * (isCompactH ? 0.045 : 0.075), minPadY, Math.max(settings.padding, 36))
   )
 
   const usableW = Math.max(120, safeW - effectivePaddingX * 2)
@@ -75,17 +79,23 @@ export function computeStageOptics(
   const constrainedW =
     settings.maxContentWidth > 0 ? Math.min(settings.maxContentWidth, usableW) : usableW
 
-  // Anchor 1.0x scale at ~460px inner width; widen comfortably to fill banners, shrink smoothly < 360px
+  // Anchor 1.0x scale at ~460px inner width; widen comfortably to fill banners, scale proportionally down in micro windows
   const widthRatio = Math.pow(constrainedW / 460, 0.62)
-  const clampedScale = clamp(widthRatio, 0.66, 2.35)
+  const clampedScale = clamp(widthRatio, 0.46, 2.35)
   const widthScaledSize = settings.fontSize * clampedScale
 
-  // Preserve peripheral preview lines vertically on short-height banner layouts (e.g., 1280x220)
-  const targetMinLines = usableH < 110 ? 2.0 : usableH < 210 ? 3.05 : usableH < 340 ? 3.7 : 4.2
+  // Preserve peripheral preview lines vertically; only allow shrinking below settings.fontSize when the window itself is small
+  const targetMinLines =
+    usableH < 100 ? 2.75 : usableH < 190 ? 3.2 : usableH < 340 ? 3.7 : 4.2
   const autoHeightCap = usableH / (targetMinLines * settings.lineHeight)
-  const cappedByAperture = Math.min(widthScaledSize, Math.max(settings.fontSize, autoHeightCap))
+  const heightCeiling =
+    safeW < 420 && usableH < 190
+      ? Math.max(13, autoHeightCap)
+      : Math.max(settings.fontSize, autoHeightCap)
+  const cappedByAperture = Math.min(widthScaledSize, heightCeiling)
 
-  const effectiveFontSize = Math.round(clamp(cappedByAperture, 12, 200))
+  const minFont = isCompactW || isCompactH ? 13 : 12
+  const effectiveFontSize = Math.round(clamp(cappedByAperture, minFont, 200))
 
   // Optical CPL-driven leading compensation (narrow needs tighter, wide > 68 ch benefits from extra breathing)
   const estimatedCpl = Math.max(10, Math.round(constrainedW / (effectiveFontSize * 0.54)))

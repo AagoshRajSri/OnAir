@@ -46,6 +46,8 @@ interface ReaderProps {
   currentSession: Session | null
   tabIndex: number
   tabCount: number
+  compactMode?: boolean
+  compactHovered?: boolean
   isStreaming?: boolean
   commandEvent: { cmd: ShortcutId; seq: number } | null
   onSentenceChange: (index: number) => void
@@ -59,6 +61,8 @@ export default function Reader({
   currentSession,
   tabIndex,
   tabCount,
+  compactMode = false,
+  compactHovered = false,
   isStreaming = false,
   commandEvent,
   onSentenceChange,
@@ -102,8 +106,17 @@ export default function Reader({
     text: displayText
   })
 
-  const sentences = useMemo(() => splitSentences(displayText), [displayText])
-  const wordCount = useMemo(() => countWords(displayText), [displayText])
+  const sentences = useMemo(
+    () => (settings.pageMode ? splitSentences(displayText) : []),
+    [settings.pageMode, displayText]
+  )
+  const hasContent = displayText.trim().length > 0
+  const hasText = text.length > 0
+  const showMediumMetrics = !compactMode && stageSize.width >= 440
+  const wordCount = useMemo(
+    () => (showMediumMetrics ? countWords(displayText) : 0),
+    [showMediumMetrics, displayText]
+  )
 
   const clampedIndex = clampSentenceIndex(sentenceIndex, sentences.length)
 
@@ -147,7 +160,7 @@ export default function Reader({
     const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
     const ratio = maxScroll > 0 ? Math.max(0, Math.min(1, el.scrollTop / maxScroll)) : 0
     if (progressFillRef.current) {
-      progressFillRef.current.style.width = `${(ratio * 100).toFixed(1)}%`
+      progressFillRef.current.style.transform = `scaleX(${ratio.toFixed(4)})`
     }
     const fadeTop = maxScroll > 6 && el.scrollTop > 6
     const fadeBottom = maxScroll > 6 && el.scrollTop < maxScroll - 6
@@ -184,7 +197,7 @@ export default function Reader({
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [displayText, settings.readingMode, updateScrollTelemetry])
+  }, [hasText, settings.readingMode, updateScrollTelemetry])
 
   const currentKey = currentSession
     ? `${currentSession.id}:${currentSession.createdAt}:${currentSession.bridgeMessageId ?? ''}`
@@ -234,7 +247,7 @@ export default function Reader({
       text: displayText
     }
 
-    if (sentences.length === 0) {
+    if (!hasContent) {
       updateScrollTelemetry()
       return
     }
@@ -259,7 +272,7 @@ export default function Reader({
     const el = containerRef.current?.querySelector(`[data-i="${clampedIndex}"]`)
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     updateScrollTelemetry()
-  }, [clampedIndex, currentKey, sentences.length, settings.pageMode, displayText, updateScrollTelemetry])
+  }, [clampedIndex, currentKey, hasContent, sentences.length, settings.pageMode, displayText, updateScrollTelemetry])
 
   const goToSentence = useCallback(
     (next: number) => {
@@ -468,7 +481,7 @@ export default function Reader({
           break
         }
         case ' ': {
-          if (sentences.length > 0 && !settings.pageMode) {
+          if (hasContent && !settings.pageMode) {
             e.preventDefault()
             toggleScroll()
           }
@@ -492,6 +505,7 @@ export default function Reader({
     },
     [
       settings.pageMode,
+      hasContent,
       sentences,
       stepSentence,
       goToSentence,
@@ -523,6 +537,8 @@ export default function Reader({
         baseFontSize={settings.fontSize}
         responsiveScale={settings.responsiveScale}
         windowHeight={windowHeight}
+        compactMode={compactMode}
+        compactHovered={compactHovered}
         cursorHideOnPlay={settings.cursorHideOnPlay}
         commandEvent={commandEvent}
         onWpmChange={(nextWpm) => onSettingsChange({ rsvpWpm: nextWpm })}
@@ -532,30 +548,34 @@ export default function Reader({
   }
 
   if (!text) {
-    const showEmptyNav = tabCount > 1 && windowHeight >= 72
+    const showEmptyNav = compactMode ? tabCount > 1 && compactHovered : tabCount > 1 && windowHeight >= 72
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div
-          className={`reader-container${!settings.showScrollbar ? ' scrollbar-hidden' : ''}`}
+          className={`reader-container${!settings.showScrollbar || (compactMode && !compactHovered) ? ' scrollbar-hidden' : ''}`}
           ref={containerRef}
           tabIndex={0}
           onKeyDown={handleKeyDown}
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, outline: 'none' }}
         >
-          <div className="empty-state">
-            <svg className="empty-state-icon" viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round">
-              <rect x="6" y="4" width="28" height="32" rx="3" />
-              <path d="M12 14h16M12 20h16M12 26h10" strokeLinecap="round" />
-            </svg>
-            <p className="empty-state-heading">No script loaded</p>
-            <p className="empty-state-hint">
-              Paste, type, or drag a file here<br />
-              or press <span className="kbd">Ctrl+Alt+V</span> from anywhere
-            </p>
+          <div className={`empty-state${compactMode ? ' compact' : ''}`}>
+            {!compactMode && (
+              <svg className="empty-state-icon" viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round">
+                <rect x="6" y="4" width="28" height="32" rx="3" />
+                <path d="M12 14h16M12 20h16M12 26h10" strokeLinecap="round" />
+              </svg>
+            )}
+            <p className="empty-state-heading">{compactMode ? 'Waiting for script' : 'No script loaded'}</p>
+            {!compactMode && (
+              <p className="empty-state-hint">
+                Paste, type, or drag a file here<br />
+                or press <span className="kbd">Ctrl+Alt+V</span> from anywhere
+              </p>
+            )}
           </div>
         </div>
         {showEmptyNav && (
-          <div className="reader-nav-bar">
+          <div className={`reader-nav-bar${compactMode ? ' compact-nav-overlay' : ''}`}>
             <div className="reader-nav-left">
               <button
                 type="button"
@@ -589,18 +609,23 @@ export default function Reader({
     )
   }
 
-  const showNavBar = (tabCount > 0 || sentences.length > 0) && windowHeight >= 72
+  const showNavBar = compactMode
+    ? (tabCount > 0 || hasContent) && compactHovered
+    : (tabCount > 0 || hasContent) && windowHeight >= 72
   const isBionic = settings.readingMode === 'bionic'
   const hideStageCursor = settings.cursorHideOnPlay && (scrolling || isStreaming)
-  const isMediumWidth = stageSize.width >= 440
-  const isWideStage = stageSize.width >= 680
+  const isMediumWidth = showMediumMetrics
+  const isWideStage = !compactMode && stageSize.width >= 680
+  const allowEdgeFade = settings.edgeFade && !settings.pageMode && stageSize.height >= 190
+  const showReadingGuide = settings.readingGuide && !settings.pageMode && stageSize.height >= 120
+  const showScrollLabel = !compactMode || stageSize.width >= 230
 
   const progressRatio = settings.pageMode
     ? sentences.length > 1
       ? clampedIndex / (sentences.length - 1)
       : 1
     : scrollEdges.progressStep / 20
-  const remainingSec = estimateRemainingSeconds(wordCount, progressRatio, 150)
+  const remainingSec = showMediumMetrics ? estimateRemainingSeconds(wordCount, progressRatio, 150) : 0
 
   const stageStyle = {
     '--stage-font-size': `${optics.effectiveFontSize}px`,
@@ -613,20 +638,21 @@ export default function Reader({
   const containerClasses = [
     'reader-container',
     'teleprompter-stage',
-    !settings.showScrollbar ? 'scrollbar-hidden' : '',
-    settings.edgeFade && !settings.pageMode && scrollEdges.fadeTop ? 'fade-top' : '',
-    settings.edgeFade && !settings.pageMode && scrollEdges.fadeBottom ? 'fade-bottom' : ''
+    isStreaming ? 'is-streaming' : '',
+    !settings.showScrollbar || (compactMode && !compactHovered) ? 'scrollbar-hidden' : '',
+    allowEdgeFade && scrollEdges.fadeTop ? 'fade-top' : '',
+    allowEdgeFade && scrollEdges.fadeBottom ? 'fade-bottom' : ''
   ]
     .filter(Boolean)
     .join(' ')
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <div
         className={`reader-stage-wrap${hideStageCursor ? ' cursor-hide' : ''}`}
         style={stageStyle}
       >
-        {settings.readingGuide && !settings.pageMode && (
+        {showReadingGuide && (
           <div className="reading-guide-band" aria-hidden="true">
             <span className="reading-guide-tick left" />
             <span className="reading-guide-tick right" />
@@ -679,12 +705,16 @@ export default function Reader({
       </div>
 
       {showNavBar && (
-        <div className="reader-nav-bar">
+        <div className={`reader-nav-bar${compactMode ? ' compact-nav-overlay' : ''}`}>
           <div className="reader-progress-track" aria-hidden="true">
             <div
               ref={progressFillRef}
               className="reader-progress-fill"
-              style={settings.pageMode ? { width: `${(progressRatio * 100).toFixed(1)}%` } : undefined}
+              style={
+                settings.pageMode
+                  ? { transform: `scaleX(${progressRatio.toFixed(4)})` }
+                  : undefined
+              }
             />
           </div>
 
@@ -811,14 +841,14 @@ export default function Reader({
                       <rect x="0" y="0" width="3.5" height="9" rx="1" />
                       <rect x="5.5" y="0" width="3.5" height="9" rx="1" />
                     </svg>
-                    Scroll
+                    {showScrollLabel && 'Scroll'}
                   </>
                 ) : (
                   <>
                     <svg width="9" height="9" viewBox="0 0 9 9" fill="currentColor" style={{ flexShrink: 0 }}>
                       <path d="M1 0.5l7 4-7 4V0.5z" />
                     </svg>
-                    Scroll
+                    {showScrollLabel && 'Scroll'}
                   </>
                 )}
               </button>

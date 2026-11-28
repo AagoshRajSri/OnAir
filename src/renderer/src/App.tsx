@@ -104,6 +104,10 @@ export default function App(): ReactElement {
   const [toast, setToast] = useState<string | null>(null)
   const [showToolbar, setShowToolbar] = useState(false)
   const [windowHeight, setWindowHeight] = useState(window.innerHeight)
+  const [shellSize, setShellSize] = useState({
+    width: Math.max(120, window.innerWidth - 44),
+    height: Math.max(80, window.innerHeight - 44)
+  })
   const [isEditing, setIsEditing] = useState(false)
   const [streamingSessionIds, setStreamingSessionIds] = useState<string[]>([])
   const [isDraggingOver, setIsDraggingOver] = useState(false)
@@ -123,6 +127,10 @@ export default function App(): ReactElement {
   const pendingEditSessionRef = useRef<Session | null>(null)
   const editSnapshotRef = useRef<{ id: string; text: string; title: string } | null>(null)
   const userEditedTabIdsRef = useRef<Set<string>>(new Set())
+  const pendingBridgeChunksRef = useRef<Map<string, ContentIncomingPayload>>(new Map())
+  const bridgeChunkRafRef = useRef<number | null>(null)
+  const pendingAiChunkRef = useRef<AIStreamChunkPayload | null>(null)
+  const aiChunkRafRef = useRef<number | null>(null)
   const modeSwitchStartRef = useRef<number | null>(null)
   const activeAiStreamRef = useRef<{
     streamId: string
@@ -135,6 +143,7 @@ export default function App(): ReactElement {
   const openInNewTabRef = useRef(settings.openInNewTab)
   const saveWatchedRef = useRef(settings.saveWatchedToHistory)
   const pageModeRef = useRef(settings.pageMode)
+  const appShellRef = useRef<HTMLDivElement | null>(null)
   const tabBarRef = useRef<HTMLDivElement | null>(null)
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const cmdSeq = useRef(0)
@@ -234,11 +243,28 @@ export default function App(): ReactElement {
     }
   }, [])
 
-  // Window resize handler for toolbar and tab bar visibility
+  // Window & inner shell resize observer for smooth compact/desktop chrome transitions
   useEffect(() => {
     const handleResize = (): void => setWindowHeight(window.innerHeight)
     window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
+
+    const shellEl = appShellRef.current
+    if (!shellEl || typeof ResizeObserver === 'undefined') {
+      return () => window.removeEventListener('resize', handleResize)
+    }
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect
+      if (!rect) return
+      const w = Math.round(rect.width)
+      const h = Math.round(rect.height)
+      setShellSize((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }))
+    })
+    ro.observe(shellEl)
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      ro.disconnect()
+    }
   }, [])
 
   // Handle incoming content: update active/matching bridge session in place or open new tab via §7.4
@@ -623,21 +649,22 @@ export default function App(): ReactElement {
     [settings.fontSize, handleToggleLock, handleSettingsChange, handleBack, handleCycleMode, stepAnswer]
   )
 
-  // Register push listeners
+  // Register push listeners (frame-coalesce mid-stream chunks for smooth 60 FPS rendering)
   useEffect(() => {
     if (!window.api) return
-    const unContent = window.api.onContentIncoming(handleNewContent)
-    const unCommand = window.api.onCommand(handleCommand)
-    const unToast = window.api.onToast((msg) => showToast(msg))
-    const unSettings = window.api.onSettingsUpdated((updated) => {
-      setSettings(updated)
-      applySettingsToDOM(updated)
-    })
-    const unBridge = window.api.onBridgeStatusUpdated((status) => {
-      setBridgeStatus(status)
-    })
+    const pendingBridgeChunks = pendingBridgeChunksRef.current
 
-    const unAiChunk = window.api.onAiStreamChunk((payload) => {
+    const flushPendingBridgeChunks = (): void => {
+      bridgeChunkRafRef.current = null
+      if (pendingBridgeChunks.size === 0) return
+      const queued = Array.from(pendingBridgeChunks.values())
+      pendingBridgeChunks.clear()
+      for (const item of queued) {
+        handleNewContent(item)
+      }
+    }
+
+    const applyAiChunkNow = (payload: AIStreamChunkPayload): void => {
       const receivedAt = performance.timeOrigin + performance.now()
       const active = activeAiStreamRef.current
       if (!active || active.streamId !== payload.streamId) return
@@ -668,9 +695,62 @@ export default function App(): ReactElement {
           })
         })
       }
+    }
+
+    const unContent = window.api.onContentIncoming((payload) => {
+      const isContinuationChunk = Boolean(
+        payload.final === false &&
+          payload.bridgeId &&
+          tabsRef.current.some((t) => t.bridgeMessageId === payload.bridgeId)
+      )
+      if (!isContinuationChunk) {
+        if (payload.bridgeId) {
+          pendingBridgeChunksRef.current.delete(payload.bridgeId)
+        }
+        handleNewContent(payload)
+        return
+      }
+      pendingBridgeChunksRef.current.set(payload.bridgeId!, payload)
+      if (bridgeChunkRafRef.current === null) {
+        bridgeChunkRafRef.current = requestAnimationFrame(flushPendingBridgeChunks)
+      }
+    })
+    const unCommand = window.api.onCommand(handleCommand)
+    const unToast = window.api.onToast((msg) => showToast(msg))
+    const unSettings = window.api.onSettingsUpdated((updated) => {
+      setSettings(updated)
+      applySettingsToDOM(updated)
+    })
+    const unBridge = window.api.onBridgeStatusUpdated((status) => {
+      setBridgeStatus(status)
+    })
+
+    const unAiChunk = window.api.onAiStreamChunk((payload) => {
+      const active = activeAiStreamRef.current
+      if (!active || active.streamId !== payload.streamId) return
+      const activeTab = tabsRef.current.find((t) => t.id === active.sessionId)
+      if (!activeTab || activeTab.text.length === 0) {
+        pendingAiChunkRef.current = null
+        applyAiChunkNow(payload)
+        return
+      }
+      pendingAiChunkRef.current = payload
+      if (aiChunkRafRef.current === null) {
+        aiChunkRafRef.current = requestAnimationFrame(() => {
+          aiChunkRafRef.current = null
+          const queued = pendingAiChunkRef.current
+          pendingAiChunkRef.current = null
+          if (queued) applyAiChunkNow(queued)
+        })
+      }
     })
 
     const unAiDone = window.api.onAiStreamDone((payload) => {
+      pendingAiChunkRef.current = null
+      if (aiChunkRafRef.current !== null) {
+        cancelAnimationFrame(aiChunkRafRef.current)
+        aiChunkRafRef.current = null
+      }
       const active = activeAiStreamRef.current
       if (!active || active.streamId !== payload.streamId) return
       activeAiStreamRef.current = null
@@ -720,6 +800,11 @@ export default function App(): ReactElement {
     })
 
     const unAiError = window.api.onAiStreamError((payload) => {
+      pendingAiChunkRef.current = null
+      if (aiChunkRafRef.current !== null) {
+        cancelAnimationFrame(aiChunkRafRef.current)
+        aiChunkRafRef.current = null
+      }
       const active = activeAiStreamRef.current
       if (!active || active.streamId !== payload.streamId) return
       activeAiStreamRef.current = null
@@ -745,6 +830,16 @@ export default function App(): ReactElement {
     })
 
     return () => {
+      if (bridgeChunkRafRef.current !== null) {
+        cancelAnimationFrame(bridgeChunkRafRef.current)
+        bridgeChunkRafRef.current = null
+      }
+      if (aiChunkRafRef.current !== null) {
+        cancelAnimationFrame(aiChunkRafRef.current)
+        aiChunkRafRef.current = null
+      }
+      pendingBridgeChunks.clear()
+      pendingAiChunkRef.current = null
       unContent()
       unCommand()
       unToast()
@@ -1065,13 +1160,102 @@ export default function App(): ReactElement {
     )
   }
 
-  const shouldShowToolbar =
-    windowHeight >= 100 &&
-    (settings.toolbarMode === 'always' || (settings.toolbarMode === 'hover' && showToolbar))
+  const isCompactShell =
+    !isMaximized &&
+    !showSettings &&
+    !showPromptBar &&
+    !isEditing &&
+    (shellSize.width < 320 || shellSize.height < 200)
+
+  const shouldShowToolbar = isCompactShell
+    ? showToolbar
+    : windowHeight >= 100 &&
+      (settings.toolbarMode === 'always' || (settings.toolbarMode === 'hover' && showToolbar))
+
+  const shouldShowTabBar = isCompactShell
+    ? tabs.length > 1 && showToolbar && shellSize.height >= 136
+    : tabs.length > 0 && windowHeight >= 100
+
+  const topChromeContent = (
+    <>
+      {shouldShowToolbar && (
+        <Toolbar
+          locked={settings.locked}
+          isEditing={isEditing}
+          readingMode={settings.readingMode}
+          onCycleMode={handleCycleMode}
+          onTogglePrompt={() => {
+            if (isEditing) exitEditMode()
+            setShowPromptBar((v) => !v)
+          }}
+          onOpenFile={handleOpenFile}
+          onImportClipboard={() => window.api.clipboardImport()}
+          onEdit={toggleEditMode}
+          onToggleLock={handleToggleLock}
+          onSettings={() => setShowSettings((v) => !v)}
+          onHide={() => window.api.windowApply({ hidden: true })}
+          onMinimize={() => window.api.windowApply({ minimize: true })}
+          onToggleMaximize={() => window.api.windowApply({ toggleMaximize: true })}
+          onClose={() => window.api.windowApply({ close: true })}
+        />
+      )}
+
+      {showPromptBar && !isEditing && (
+        <PromptBar
+          hasContextText={text.trim().length > 0}
+          isStreaming={isAiStreaming}
+          provider={settings.aiProvider}
+          model={settings.aiModel}
+          onSubmitPrompt={handleStartAiPrompt}
+          onAbort={handleAbortAiPrompt}
+          onClose={() => setShowPromptBar(false)}
+        />
+      )}
+
+      {shouldShowTabBar && (
+        <div className="tab-bar" ref={tabBarRef}>
+          {tabs.map((tab) => {
+            const isActive = tab.id === activeTabId
+            const isTabStreaming = streamingSessionIds.includes(tab.id)
+            return (
+              <div
+                key={tab.id}
+                className={`tab-item${isActive ? ' active' : ''}${isTabStreaming ? ' streaming' : ''}`}
+                onClick={() => switchToTab(tab.id)}
+                title={tab.title || 'Untitled'}
+              >
+                <span className="tab-title">{tab.title || 'Untitled'}</span>
+                <button
+                  type="button"
+                  className="tab-close"
+                  aria-label="Close tab"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleCloseTab(tab.id)
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
+          <button
+            type="button"
+            className="tab-add"
+            title="New tab"
+            aria-label="New tab"
+            onClick={handleNewBlankTab}
+          >
+            +
+          </button>
+        </div>
+      )}
+    </>
+  )
 
   return (
     <div
-      className={`app-viewport${isMaximized ? ' maximized' : ''}`}
+      className={`app-viewport${isMaximized ? ' maximized' : ''}${isCompactShell ? ' compact-viewport' : ''}${showToolbar ? ' shell-hovered' : ''}`}
       onMouseMove={(e) => {
         if (draggingWinRef.current || resizingEdgeRef.current || isMaximized) {
           setIgnoreMouse(false)
@@ -1087,7 +1271,8 @@ export default function App(): ReactElement {
       }}
     >
       <div
-        className={`app-shell${isDraggingOver ? ' drag-active' : ''}`}
+        ref={appShellRef}
+        className={`app-shell${isDraggingOver ? ' drag-active' : ''}${isCompactShell ? ' compact-shell' : ''}${showToolbar ? ' is-hovered' : ''}`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -1122,84 +1307,18 @@ export default function App(): ReactElement {
               onLostPointerCapture={finishWindowResize}
             />
           ))}
-        {/* 10px drag strip across top with CSS -webkit-app-region: drag */}
-        <div className="drag-strip">
+        {/* Drag strip across top: overlays top border in compact mode so text owns 100% vertical area */}
+        <div className={`drag-strip${isCompactShell ? ' compact-drag' : ''}`}>
           {settings.clipboardWatch && <div className="watch-dot" />}
         </div>
 
-        {/* Toolbar row below drag strip, driven by settings.toolbarMode */}
-        {shouldShowToolbar && (
-          <Toolbar
-            locked={settings.locked}
-            isEditing={isEditing}
-            readingMode={settings.readingMode}
-            onCycleMode={handleCycleMode}
-            onTogglePrompt={() => {
-              if (isEditing) exitEditMode()
-              setShowPromptBar((v) => !v)
-            }}
-            onOpenFile={handleOpenFile}
-            onImportClipboard={() => window.api.clipboardImport()}
-            onEdit={toggleEditMode}
-            onToggleLock={handleToggleLock}
-            onSettings={() => setShowSettings((v) => !v)}
-            onHide={() => window.api.windowApply({ hidden: true })}
-            onMinimize={() => window.api.windowApply({ minimize: true })}
-            onToggleMaximize={() => window.api.windowApply({ toggleMaximize: true })}
-            onClose={() => window.api.windowApply({ close: true })}
-          />
-        )}
-
-        {showPromptBar && !isEditing && (
-          <PromptBar
-            hasContextText={text.trim().length > 0}
-            isStreaming={isAiStreaming}
-            provider={settings.aiProvider}
-            model={settings.aiModel}
-            onSubmitPrompt={handleStartAiPrompt}
-            onAbort={handleAbortAiPrompt}
-            onClose={() => setShowPromptBar(false)}
-          />
-        )}
-
-        {/* Tab strip for switching between multiple pasted/imported texts in one window */}
-        {tabs.length > 0 && windowHeight >= 100 && (
-          <div className="tab-bar" ref={tabBarRef}>
-            {tabs.map((tab) => {
-              const isActive = tab.id === activeTabId
-              const isTabStreaming = streamingSessionIds.includes(tab.id)
-              return (
-                <div
-                  key={tab.id}
-                  className={`tab-item${isActive ? ' active' : ''}${isTabStreaming ? ' streaming' : ''}`}
-                  onClick={() => switchToTab(tab.id)}
-                  title={tab.title || 'Untitled'}
-                >
-                  <span className="tab-title">{tab.title || 'Untitled'}</span>
-                  <button
-                    type="button"
-                    className="tab-close"
-                    aria-label="Close tab"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleCloseTab(tab.id)
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              )
-            })}
-            <button
-              type="button"
-              className="tab-add"
-              title="New tab"
-              aria-label="New tab"
-              onClick={handleNewBlankTab}
-            >
-              +
-            </button>
-          </div>
+        {/* In compact mode, float top chrome only on hover so underlying text never reflows/jumps */}
+        {isCompactShell ? (
+          (shouldShowToolbar || shouldShowTabBar) && (
+            <div className="compact-top-chrome">{topChromeContent}</div>
+          )
+        ) : (
+          topChromeContent
         )}
 
         {/* Reader or live dynamic edit textarea */}
@@ -1283,6 +1402,8 @@ export default function App(): ReactElement {
             currentSession={currentSession}
             tabIndex={currentTabIndex}
             tabCount={tabs.length}
+            compactMode={isCompactShell}
+            compactHovered={showToolbar}
             isStreaming={
               Boolean(currentSession && streamingSessionIds.includes(currentSession.id)) ||
               (isAiStreaming && activeAiStreamRef.current?.sessionId === currentSession?.id)

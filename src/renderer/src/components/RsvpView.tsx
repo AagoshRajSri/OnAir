@@ -12,6 +12,8 @@ interface RsvpViewProps {
   baseFontSize: number
   responsiveScale: boolean
   windowHeight: number
+  compactMode?: boolean
+  compactHovered?: boolean
   cursorHideOnPlay?: boolean
   commandEvent: { cmd: ShortcutId; seq: number } | null
   onWpmChange: (nextWpm: number) => void
@@ -30,6 +32,8 @@ export default function RsvpView({
   baseFontSize,
   responsiveScale,
   windowHeight,
+  compactMode = false,
+  compactHovered = false,
   cursorHideOnPlay = false,
   commandEvent,
   onWpmChange,
@@ -287,8 +291,9 @@ export default function RsvpView({
   const current = tokens[clampedIdx]
   const progressRatio = tokens.length > 1 ? clampedIdx / (tokens.length - 1) : 1
   const remainingSec = estimateRemainingSeconds(tokens.length, progressRatio, wpm)
-  const showNavBar = windowHeight >= 72
-  const isWide = stageSize.width >= 540
+  const showNavBar = compactMode ? compactHovered : windowHeight >= 72
+  const isWide = !compactMode && stageSize.width >= 540
+  const showReticle = stageSize.height >= 95
 
   return (
     <div
@@ -297,7 +302,7 @@ export default function RsvpView({
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onWheel={onWheel}
-      style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, outline: 'none' }}
+      style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, outline: 'none' }}
     >
       <div
         ref={stageRef}
@@ -306,19 +311,19 @@ export default function RsvpView({
         title="Click or press Space to play/pause"
       >
         <div className="rsvp-horizon-line" aria-hidden="true" />
-        <div className="rsvp-reticle-guide rsvp-reticle-top" aria-hidden="true" />
+        {showReticle && <div className="rsvp-reticle-guide rsvp-reticle-top" aria-hidden="true" />}
         <div className="rsvp-word-grid" style={{ fontSize: `${rsvpFontSize}px` }}>
           <span className="rsvp-prefix">{current.prefix}</span>
           <span className="rsvp-orp">{current.orp}</span>
           <span className="rsvp-suffix">{current.suffix}</span>
         </div>
-        <div className="rsvp-reticle-guide rsvp-reticle-bottom" aria-hidden="true" />
+        {showReticle && <div className="rsvp-reticle-guide rsvp-reticle-bottom" aria-hidden="true" />}
       </div>
 
       {showNavBar && (
-        <div className="reader-nav-bar">
+        <div className={`reader-nav-bar${compactMode ? ' compact-nav-overlay' : ''}`}>
           <div className="reader-progress-track" aria-hidden="true">
-            <div className="reader-progress-fill" style={{ width: `${(progressRatio * 100).toFixed(1)}%` }} />
+            <div className="reader-progress-fill" style={{ transform: `scaleX(${progressRatio.toFixed(4)})` }} />
           </div>
           <div className="reader-nav-left" style={{ gap: 3 }}>
             <button

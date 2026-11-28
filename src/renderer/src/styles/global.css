@@ -193,6 +193,16 @@ body,
   background: transparent;
 }
 
+.drag-strip.compact-drag {
+  position: absolute;
+  top: 0;
+  left: 10px;
+  right: 10px;
+  width: auto;
+  height: 8px;
+  z-index: 40;
+}
+
 /* ─── Exterior circular drag handle (bottom-left exterior angle) ────────── */
 .ext-drag-btn {
   -webkit-app-region: no-drag;
@@ -381,8 +391,11 @@ body,
   letter-spacing: 0.01em;
   line-height: 1;
   overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  scrollbar-width: none;
+}
+
+.tab-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .tab-item {
@@ -619,8 +632,6 @@ body,
   flex: 1;
   overflow-y: auto;
   padding: var(--padding);
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
 }
 
 .reader-container.teleprompter-stage {
@@ -628,29 +639,29 @@ body,
 }
 
 .reader-container.fade-top {
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.24) 0%, #000 16%, #000 100%);
-  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.24) 0%, #000 16%, #000 100%);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.28) 0%, #000 10%, #000 100%);
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.28) 0%, #000 10%, #000 100%);
 }
 
 .reader-container.fade-bottom {
-  mask-image: linear-gradient(to bottom, #000 0%, #000 82%, rgba(0, 0, 0, 0.24) 100%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 82%, rgba(0, 0, 0, 0.24) 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 90%, rgba(0, 0, 0, 0.28) 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 90%, rgba(0, 0, 0, 0.28) 100%);
 }
 
 .reader-container.fade-top.fade-bottom {
   mask-image: linear-gradient(
     to bottom,
-    rgba(0, 0, 0, 0.24) 0%,
-    #000 16%,
-    #000 82%,
-    rgba(0, 0, 0, 0.24) 100%
+    rgba(0, 0, 0, 0.28) 0%,
+    #000 10%,
+    #000 90%,
+    rgba(0, 0, 0, 0.28) 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
-    rgba(0, 0, 0, 0.24) 0%,
-    #000 16%,
-    #000 82%,
-    rgba(0, 0, 0, 0.24) 100%
+    rgba(0, 0, 0, 0.28) 0%,
+    #000 10%,
+    #000 90%,
+    rgba(0, 0, 0, 0.28) 100%
   );
 }
 
@@ -699,6 +710,10 @@ body,
   text-wrap: pretty;
 }
 
+.teleprompter-stage.is-streaming .reader-content {
+  text-wrap: wrap;
+}
+
 input,
 textarea {
   user-select: text;
@@ -743,10 +758,12 @@ textarea {
 
 .reader-progress-fill {
   height: 100%;
-  width: 0%;
+  width: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  will-change: transform;
   background: linear-gradient(90deg, var(--ui-accent), var(--ui-blue));
   opacity: 0.72;
-  transition: width 90ms linear;
 }
 
 .reader-nav-left,
@@ -754,7 +771,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 2px;
-  flex: 1;
+  flex: 1 0 auto;
+  white-space: nowrap;
 }
 
 .reader-nav-right {
@@ -857,6 +875,8 @@ textarea {
   font-variant-numeric: tabular-nums;
   color: var(--ui-text-dim);
   letter-spacing: 0.03em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ─── Toast ───────────────────────────────────────────────────────────────── */
@@ -1872,4 +1892,102 @@ textarea {
   .empty-state-icon {
     display: none;
   }
+}
+
+/* ─── Compact / micro teleprompter mode (< 320px wide or < 200px tall) ────── */
+.compact-viewport:not(.shell-hovered) .ext-drag-btn {
+  opacity: 0.28;
+}
+
+.compact-top-chrome {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: rgba(12, 12, 14, 0.9);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  animation: toolbar-slide-in var(--ui-transition);
+}
+
+.compact-shell .toolbar {
+  height: 26px;
+  padding: 0 4px;
+  background: transparent;
+  animation: none;
+}
+
+.compact-shell .toolbar .tb-sep {
+  display: none;
+}
+
+.compact-shell .toolbar button {
+  padding: 3px;
+}
+
+.compact-shell .toolbar .tb-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.compact-shell .tb-spacer {
+  min-width: 0;
+}
+
+.compact-shell .tab-bar {
+  height: 22px;
+  padding: 2px 6px;
+  background: transparent;
+}
+
+.compact-shell .tab-item {
+  height: 17px;
+  max-width: 96px;
+  padding: 0 5px 0 6px;
+  font-size: 10px;
+}
+
+.reader-nav-bar.compact-nav-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  padding: 0 6px;
+  z-index: 50;
+  background: rgba(12, 12, 14, 0.9);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.55);
+  animation: compact-nav-in var(--ui-transition);
+}
+
+@keyframes compact-nav-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.compact-nav-overlay .reader-nav-btn {
+  padding: 2px 5px;
+  font-size: 10px;
+}
+
+.compact-nav-overlay .reader-nav-count {
+  font-size: 10px;
+}
+
+.empty-state.compact {
+  padding: 12px;
+  gap: 6px;
+}
+
+.empty-state.compact .empty-state-heading {
+  font-size: 12px;
+  color: var(--ui-text-dim);
 }
