@@ -722,7 +722,7 @@ export default function SettingsPanel({
 
       <Row
         label="Always open at default location &amp; size"
-        hint="On every launch, opens at your custom default bounds (or camera top-center if unset) instead of your last position."
+        hint="On every launch, snaps to your saved custom default or top-center at your current window size."
       >
         <Toggle
           checked={settings.alwaysOpenAtTopCenter}
@@ -739,7 +739,7 @@ export default function SettingsPanel({
           <span className="sp-label" style={{ flex: '1 1 120px', fontSize: 11, color: 'var(--ui-text-muted)' }}>
             {settings.defaultBounds
               ? `Custom: ${settings.defaultBounds.width}×${settings.defaultBounds.height} at (${settings.defaultBounds.x}, ${settings.defaultBounds.y})`
-              : 'Built-in: Camera top-center (380×180)'}
+              : 'Top-center, keeps current size'}
           </span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, flexShrink: 0 }}>
             <button
@@ -754,7 +754,7 @@ export default function SettingsPanel({
               type="button"
               className="sp-btn"
               onClick={() => window.api.windowApply({ snapTopCenter: true })}
-              title="Move and resize window to default"
+              title="Snap to top-center (keeps current size unless a custom default is saved)"
             >
               Snap
             </button>

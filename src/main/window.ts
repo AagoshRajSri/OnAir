@@ -95,10 +95,17 @@ function getValidBounds(
   const primaryWa = screen.getPrimaryDisplay().workArea
 
   if (alwaysOpenAtTopCenter) {
-    const candidate = resolveDefaultBounds(defaultBounds, primaryWa)
-    return !defaultBounds || hasDisplayOverlap(candidate, displays)
-      ? candidate
-      : computeTopCenterBounds(primaryWa, candidate.width, candidate.height)
+    if (defaultBounds) {
+      // User has a fully-custom default: use it (with display-overlap fallback)
+      const candidate = resolveDefaultBounds(defaultBounds, primaryWa)
+      return hasDisplayOverlap(candidate, displays)
+        ? candidate
+        : computeTopCenterBounds(primaryWa, candidate.width, candidate.height)
+    }
+    // No custom default: snap to top-center but preserve the last-used size
+    const savedW = saved ? Math.max(MIN_WIN_WIDTH, saved.width) : DEFAULT_WIN_WIDTH
+    const savedH = saved ? Math.max(MIN_WIN_HEIGHT, saved.height) : DEFAULT_WIN_HEIGHT
+    return computeTopCenterBounds(primaryWa, savedW, savedH)
   }
 
   if (saved) {
@@ -568,13 +575,24 @@ export async function applyWindowSettings(
     const display = screen.getDisplayMatching(cur)
     const s = await loadSettings()
     const displays = screen.getAllDisplays()
-    let target = resolveDefaultBounds(s.defaultBounds, display.workArea)
-    if (s.defaultBounds && !hasDisplayOverlap(target, displays)) {
-      target = computeTopCenterBounds(display.workArea, target.width, target.height)
+    let target: Rectangle
+    if (s.defaultBounds) {
+      // User saved a custom default: use that exact size + position
+      target = resolveDefaultBounds(s.defaultBounds, display.workArea)
+      if (!hasDisplayOverlap(target, displays)) {
+        target = computeTopCenterBounds(display.workArea, target.width, target.height)
+      }
+    } else {
+      // No custom default: snap to top-center but KEEP the current window size
+      target = computeTopCenterBounds(display.workArea, cur.width, cur.height)
     }
     win.setBounds(target)
     s.bounds = target
     await saveSettings(s)
+    // Notify renderer so the Default Location label refreshes
+    if (!win.isDestroyed()) {
+      win.webContents.send(IPC.settingsUpdated, s)
+    }
     return
   }
 
