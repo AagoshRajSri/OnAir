@@ -1191,6 +1191,7 @@ export default function App(): ReactElement {
           onOpenFile={handleOpenFile}
           onImportClipboard={() => window.api.clipboardImport()}
           onEdit={toggleEditMode}
+          onSnapTopCenter={() => window.api.windowApply({ snapTopCenter: true })}
           onToggleLock={handleToggleLock}
           onSettings={() => setShowSettings((v) => !v)}
           onHide={() => window.api.windowApply({ hidden: true })}

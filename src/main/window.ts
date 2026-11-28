@@ -9,6 +9,10 @@ import { IPC } from '../shared/types'
 
 const MIN_WIN_WIDTH = 180
 const MIN_WIN_HEIGHT = 110
+const DEFAULT_WIN_WIDTH = 520
+const DEFAULT_WIN_HEIGHT = 280
+// .app-viewport uses padding: 6px 6px 38px 38px, shifting the visible card center +16px right
+const CARD_CENTER_X_OFFSET = 16
 
 let boundsTimer: ReturnType<typeof setTimeout> | null = null
 let mainWin: BrowserWindow | null = null
@@ -29,10 +33,37 @@ export function getMainWindow(): BrowserWindow | null {
   return mainWin && !mainWin.isDestroyed() ? mainWin : null
 }
 
-function getValidBounds(saved: Settings['bounds']): Rectangle {
+/**
+ * Position the window top-center on the given workArea so the visible teleprompter card
+ * sits dead-center below the webcam and attached cleanly to the top edge.
+ */
+export function computeTopCenterBounds(
+  workArea: Rectangle,
+  width: number,
+  height: number
+): Rectangle {
+  const safeW = Math.max(MIN_WIN_WIDTH, Math.round(width))
+  const safeH = Math.max(MIN_WIN_HEIGHT, Math.round(height))
+  const maxX = Math.max(workArea.x, workArea.x + workArea.width - safeW)
+  const centeredX = Math.round(workArea.x + (workArea.width - safeW) / 2 - CARD_CENTER_X_OFFSET)
+  return {
+    x: Math.max(workArea.x, Math.min(maxX, centeredX)),
+    y: workArea.y,
+    width: safeW,
+    height: safeH
+  }
+}
+
+function getValidBounds(saved: Settings['bounds'], alwaysOpenAtTopCenter = false): Rectangle {
   const displays = screen.getAllDisplays()
   const MIN_W_OVERLAP = 100
   const MIN_H_OVERLAP = 40
+
+  if (alwaysOpenAtTopCenter) {
+    const w = saved ? Math.max(MIN_WIN_WIDTH, saved.width) : DEFAULT_WIN_WIDTH
+    const h = saved ? Math.max(MIN_WIN_HEIGHT, saved.height) : DEFAULT_WIN_HEIGHT
+    return computeTopCenterBounds(screen.getPrimaryDisplay().workArea, w, h)
+  }
 
   if (saved) {
     const normalized: Rectangle = {
@@ -51,14 +82,11 @@ function getValidBounds(saved: Settings['bounds']): Rectangle {
     }
   }
 
-  const primary = screen.getPrimaryDisplay()
-  const wa = primary.workArea
-  return {
-    x: Math.round(wa.x + (wa.width - 520) / 2),
-    y: Math.round(wa.y + (wa.height - 360) / 2),
-    width: 520,
-    height: 360
-  }
+  return computeTopCenterBounds(
+    screen.getPrimaryDisplay().workArea,
+    DEFAULT_WIN_WIDTH,
+    DEFAULT_WIN_HEIGHT
+  )
 }
 
 function getAppIcon(): Electron.NativeImage | undefined {
@@ -194,7 +222,7 @@ export function setWindowIgnoreMouse(ignore: boolean): void {
 
 export async function createReaderWindow(): Promise<BrowserWindow> {
   const settings = await loadSettings()
-  const bounds = getValidBounds(settings.bounds)
+  const bounds = getValidBounds(settings.bounds, settings.alwaysOpenAtTopCenter)
 
   const win = new BrowserWindow({
     x: bounds.x,
@@ -385,6 +413,10 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
       },
       { type: 'separator' },
       {
+        label: 'Snap to camera top-center',
+        click: () => applyWindowSettings(win, { snapTopCenter: true })
+      },
+      {
         label: s.locked ? 'Unlock from screen' : 'Lock on screen',
         click: () => win.webContents.send(IPC.command, 'toggleLock')
       },
@@ -468,6 +500,22 @@ export function applyWindowSettings(win: BrowserWindow, payload: WindowApplyPayl
     } else {
       win.maximize()
     }
+    return
+  }
+
+  if (payload.snapTopCenter) {
+    if (win.isMaximized()) {
+      win.unmaximize()
+    }
+    const cur = win.getNormalBounds()
+    const display = screen.getDisplayMatching(cur)
+    const target = computeTopCenterBounds(
+      display.workArea,
+      Math.max(MIN_WIN_WIDTH, cur.width),
+      Math.max(MIN_WIN_HEIGHT, cur.height)
+    )
+    win.setBounds(target)
+    persistCurrentBounds()
     return
   }
 

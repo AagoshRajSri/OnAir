@@ -10,6 +10,7 @@ interface ToolbarProps {
   onOpenFile: () => void
   onImportClipboard: () => void
   onEdit: () => void
+  onSnapTopCenter: () => void
   onToggleLock: () => void
   onSettings: () => void
   onHide: () => void
@@ -86,6 +87,16 @@ function IconMode({ mode }: { mode: ReadingMode }): ReactElement {
   )
 }
 
+function IconTopCenter(): ReactElement {
+  return (
+    <svg className="tb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round">
+      <rect x="2" y="2" width="12" height="12" rx="1.8" opacity="0.45" />
+      <rect x="4.5" y="3.5" width="7" height="3.2" rx="0.8" fill="currentColor" stroke="none" />
+      <path d="M8 12.5V8.5M6.2 10.2L8 8.4l1.8 1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function IconLock({ locked }: { locked: boolean }): ReactElement {
   return locked ? (
     <svg className="tb-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round">
@@ -133,6 +144,7 @@ export default function Toolbar({
   onOpenFile,
   onImportClipboard,
   onEdit,
+  onSnapTopCenter,
   onToggleLock,
   onSettings,
   onHide,
@@ -175,6 +187,15 @@ export default function Toolbar({
       >
         <IconMode mode={readingMode} />
         <span className="tb-label">{MODE_LABELS[readingMode]}</span>
+      </button>
+
+      <button
+        onClick={onSnapTopCenter}
+        title="Snap to default location (top-center below camera)"
+        aria-label="Snap to camera top-center"
+      >
+        <IconTopCenter />
+        <span className="tb-label">Top</span>
       </button>
 
       <button

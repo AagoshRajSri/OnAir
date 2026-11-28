@@ -60,6 +60,7 @@ export interface Settings {
   // ── Window ──────────────────────────────────────────────────
   opacity: number            // 0.30–1.00
   alwaysOnTop: boolean
+  alwaysOpenAtTopCenter: boolean // always launch centered at top edge below camera
   locked: boolean
   minimizeOnBlur: boolean    // minimize when unlocked and clicking away
   cursorHideOnPlay: boolean  // hide mouse cursor while teleprompter plays/scrolls
@@ -127,6 +128,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Window
   opacity: 1,
   alwaysOnTop: true,
+  alwaysOpenAtTopCenter: false,
   locked: false,
   minimizeOnBlur: false,
   cursorHideOnPlay: false,
@@ -293,6 +295,7 @@ export interface WindowApplyPayload {
   minimize?: boolean
   toggleMaximize?: boolean
   close?: boolean
+  snapTopCenter?: boolean
   sizePreset?: 'Column' | 'Compact' | 'Wide' | 'Stage'
 }
 

@@ -720,6 +720,29 @@ export default function SettingsPanel({
         }} />
       </Row>
 
+      <Row
+        label="Always open at camera top-center"
+        hint="On every launch, opens centered at the top edge below your camera instead of your last position."
+      >
+        <Toggle
+          checked={settings.alwaysOpenAtTopCenter}
+          onChange={(v) => {
+            onChange({ alwaysOpenAtTopCenter: v })
+            if (v) window.api.windowApply({ snapTopCenter: true })
+          }}
+        />
+      </Row>
+
+      <Row label="Default camera position" hint="Moves OnAir right under your webcam at the top center of the screen.">
+        <button
+          type="button"
+          className="sp-btn"
+          onClick={() => window.api.windowApply({ snapTopCenter: true })}
+        >
+          Snap to top-center
+        </button>
+      </Row>
+
       <Row label="Lock on screen" hint="Keeps OnAir pinned on top until closed or toggled with the shortcut, while keeping drag, resize, and drop active.">
         <Toggle checked={settings.locked} onChange={(v) => {
           onChange({ locked: v }); window.api.windowApply({ locked: v, alwaysOnTop: v || settings.alwaysOnTop })

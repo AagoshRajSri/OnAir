@@ -99,6 +99,8 @@ function clampSettings(s: Settings): Settings {
   s.showScrollbar = s.showScrollbar !== false
   if (!VALID_TOOLBAR_MODES.has(s.toolbarMode)) s.toolbarMode = 'hover'
   if (!VALID_TRANSITIONS.has(s.uiTransitionSpeed)) s.uiTransitionSpeed = 'normal'
+  s.alwaysOnTop = s.alwaysOnTop !== false
+  s.alwaysOpenAtTopCenter = Boolean(s.alwaysOpenAtTopCenter)
   s.minimizeOnBlur = Boolean(s.minimizeOnBlur)
   s.cursorHideOnPlay = Boolean(s.cursorHideOnPlay)
   s.autoScrollOnStream = s.autoScrollOnStream !== false

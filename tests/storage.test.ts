@@ -66,6 +66,7 @@ describe('Session pruning logic', () => {
     expect(DEFAULT_SETTINGS.theme).toBe('obsidian')
     expect(DEFAULT_SETTINGS.locked).toBe(false)
     expect(DEFAULT_SETTINGS.alwaysOnTop).toBe(true)
+    expect(DEFAULT_SETTINGS.alwaysOpenAtTopCenter).toBe(false)
     expect(DEFAULT_SETTINGS.openLastSessionOnStartup).toBe(false)
     expect(DEFAULT_SETTINGS.bridgeStreamOnlyNew).toBe(true)
     expect(DEFAULT_SETTINGS.autoScrollOnStream).toBe(true)
