@@ -4,6 +4,7 @@ interface PopupState {
   extensionId: string
   port: number
   token: string
+  streamOnlyNew: boolean
   tabEnabled: boolean
   contentAttached: boolean
   isStreaming: boolean
@@ -122,8 +123,12 @@ async function initPopup(): Promise<void> {
         tabSite.className = 'subtext'
         if (state.isStreaming && state.tabEnabled) {
           tabSite.textContent = `${siteLabel} · streaming answer…`
+        } else if (state.tabEnabled) {
+          tabSite.textContent = state.streamOnlyNew
+            ? `${siteLabel} · waiting for next answer`
+            : `${siteLabel} · syncing latest + new tabs`
         } else {
-          tabSite.textContent = `${siteLabel} · ${state.tabEnabled ? 'new answers open new tabs' : 'paused on this tab'}`
+          tabSite.textContent = `${siteLabel} · paused on this tab`
         }
         liveChip.hidden = !state.tabEnabled
         liveChip.textContent = state.isStreaming ? 'Streaming' : 'Live'

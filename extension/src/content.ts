@@ -37,6 +37,7 @@ export interface MirrorControllerOptions {
   adapter: ProviderAdapter
   doc: Document
   sendMessage: (msg: ContentBridgeMessage) => void
+  streamOnlyNew?: boolean
   throttleMs?: number
   idleFinalizeMs?: number
   now?: () => number
@@ -44,10 +45,11 @@ export interface MirrorControllerOptions {
 }
 
 export interface MirrorController {
-  start(): void
+  start(forceSyncExisting?: boolean): void
   stop(): void
   handleMutations(): void
   syncNow(forceEmit?: boolean): ExtractedReply | null
+  setStreamOnlyNew(streamOnlyNew: boolean, syncIfTurnedOff?: boolean): void
   isObserving(): boolean
 }
 
@@ -56,6 +58,7 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
     adapter,
     doc,
     sendMessage,
+    streamOnlyNew = false,
     throttleMs = THROTTLE_MS,
     idleFinalizeMs = IDLE_FINALIZE_MS,
     now = () => performance.now(),
@@ -64,6 +67,7 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
 
   let enabled = false
   let hasStartedBefore = false
+  let skipExistingOnStart = Boolean(streamOnlyNew)
   let observer: MutationObserver | null = null
   let throttleTimer: ReturnType<typeof setTimeout> | null = null
   let idleFinalTimer: ReturnType<typeof setTimeout> | null = null
@@ -200,7 +204,21 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
     }
   }
 
-  const start = (): void => {
+  const baselineSettledReply = (): void => {
+    const reply = adapter.getLatestReply(doc)
+    if (!reply || !reply.text || reply.isStreaming) return
+    activeReplyId = reply.id
+    const prev = stateById.get(reply.id)
+    stateById.set(reply.id, {
+      text: reply.text,
+      isStreaming: false,
+      finalSent: true,
+      seq: prev?.seq ?? 0
+    })
+    clearIdleTimer()
+  }
+
+  const start = (forceSyncExisting?: boolean): void => {
     if (enabled) return
     enabled = true
     const forceInitialSync = hasStartedBefore
@@ -220,7 +238,24 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
       })
     }
     lastScanMs = now()
-    scanAndEmit(forceInitialSync)
+    const shouldSyncExisting = forceSyncExisting !== undefined ? forceSyncExisting : !skipExistingOnStart
+    if (shouldSyncExisting) {
+      scanAndEmit(forceInitialSync)
+    } else {
+      const latest = adapter.getLatestReply(doc)
+      if (latest?.isStreaming) {
+        scanAndEmit(false)
+      } else {
+        baselineSettledReply()
+      }
+    }
+  }
+
+  const setStreamOnlyNew = (next: boolean, syncIfTurnedOff = false): void => {
+    skipExistingOnStart = Boolean(next)
+    if (!skipExistingOnStart && syncIfTurnedOff && enabled) {
+      syncNow(true)
+    }
   }
 
   const stop = (): void => {
@@ -242,6 +277,7 @@ export function createMirrorController(options: MirrorControllerOptions): Mirror
     stop,
     handleMutations,
     syncNow,
+    setStreamOnlyNew,
     isObserving: () => observer !== null
   }
 }
@@ -262,6 +298,7 @@ if (
     const controller = createMirrorController({
       adapter,
       doc: document,
+      streamOnlyNew: true,
       sendMessage: (msg) => {
         try {
           chrome.runtime.sendMessage(msg).catch(() => {
@@ -273,10 +310,10 @@ if (
       }
     })
 
-    const applyEnabled = (nextEnabled: boolean): void => {
+    const applyEnabled = (nextEnabled: boolean, syncExisting?: boolean): void => {
       tabEnabled = nextEnabled
       if (nextEnabled) {
-        controller.start()
+        controller.start(syncExisting)
       } else {
         controller.stop()
       }
@@ -296,8 +333,21 @@ if (
         return false
       }
       if (message.type === 'tab-enabled-changed') {
-        applyEnabled(Boolean(message.enabled))
+        if (typeof message.streamOnlyNew === 'boolean') {
+          controller.setStreamOnlyNew(message.streamOnlyNew, false)
+        }
+        const syncExisting =
+          typeof message.streamOnlyNew === 'boolean' ? !message.streamOnlyNew : undefined
+        applyEnabled(Boolean(message.enabled), syncExisting)
         sendResponse({ ok: true, enabled: tabEnabled })
+        return false
+      }
+      if (message.type === 'stream-only-new-changed') {
+        controller.setStreamOnlyNew(
+          Boolean(message.streamOnlyNew),
+          Boolean(message.syncExisting) && tabEnabled
+        )
+        sendResponse({ ok: true })
         return false
       }
       if (message.type === 'extract-latest-answer') {
@@ -321,8 +371,13 @@ if (
     try {
       chrome.runtime
         .sendMessage({ type: 'get-tab-state' })
-        .then((res: { enabled?: boolean } | undefined) => {
-          applyEnabled(Boolean(res?.enabled))
+        .then((res: { enabled?: boolean; streamOnlyNew?: boolean } | undefined) => {
+          if (typeof res?.streamOnlyNew === 'boolean') {
+            controller.setStreamOnlyNew(res.streamOnlyNew, false)
+          }
+          const syncExisting =
+            typeof res?.streamOnlyNew === 'boolean' ? !res.streamOnlyNew : undefined
+          applyEnabled(Boolean(res?.enabled), syncExisting)
         })
         .catch(() => {
           /* ignore */

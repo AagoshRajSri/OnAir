@@ -636,6 +636,15 @@ export default function SettingsPanel({
       <p className="sp-section-title">Teleprompter Scroll</p>
       <SliderRow label="Scroll speed" value={settings.autoScrollSpeed} min={10} max={400} step={10}
         format={(v) => `${v} px/s`} onChange={(v) => onChange({ autoScrollSpeed: v })} />
+      <Row
+        label="Auto-scroll on LLM stream"
+        hint="Automatically starts scrolling the moment an AI answer starts streaming."
+      >
+        <Toggle
+          checked={settings.autoScrollOnStream}
+          onChange={(v) => onChange({ autoScrollOnStream: v })}
+        />
+      </Row>
       <Row label="Pause scroll on hover" hint="Temporarily pauses scrolling while your pointer rests over the script.">
         <Toggle checked={settings.pauseScrollOnHover} onChange={(v) => onChange({ pauseScrollOnHover: v })} />
       </Row>
@@ -880,6 +889,15 @@ export default function SettingsPanel({
             placeholder="Extension ID"
             onChange={(e) => onChange({ bridgeExtensionId: e.target.value.trim() })}
             style={{ width: 140 }}
+          />
+        </Row>
+        <Row
+          label="Start fresh (new answers only)"
+          hint="On: starts empty when opening OnAir or toggling mirroring, streaming only answers sent afterward. Off: immediately syncs the latest existing reply."
+        >
+          <Toggle
+            checked={settings.bridgeStreamOnlyNew}
+            onChange={(v) => onChange({ bridgeStreamOnlyNew: v })}
           />
         </Row>
 

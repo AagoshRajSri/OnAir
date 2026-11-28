@@ -225,5 +225,31 @@ describe('Local Bridge Server & Protocol', () => {
     expect(status2.error).toBe('Port in use')
     expect(emitted.some((s) => s.state === 'error' && s.error === 'Port in use')).toBe(true)
   })
+
+  it('pushes welcome and live config updates only to clients subscribing with supportsConfig', async () => {
+    const token = generateBridgeToken()
+    const extId = 'configext'
+    const srv = new BridgeServer(
+      { port: 0, token, extensionId: extId, streamOnlyNew: true },
+      { onContent: () => {} }
+    )
+    servers.push(srv)
+    const status = await srv.start()
+
+    const { ws } = await connectClient(status.port, `chrome-extension://${extId}`)
+    sockets.push(ws)
+
+    const welcomePromise = new Promise<string>((resolve) => {
+      ws.once('message', (d) => resolve(d.toString()))
+    })
+    ws.send(JSON.stringify({ type: 'hello', token, provider: 'chatgpt', supportsConfig: true }))
+    expect(JSON.parse(await welcomePromise)).toEqual({ type: 'welcome', streamOnlyNew: true })
+
+    const configPromise = new Promise<string>((resolve) => {
+      ws.once('message', (d) => resolve(d.toString()))
+    })
+    await srv.updateConfig({ streamOnlyNew: false })
+    expect(JSON.parse(await configPromise)).toEqual({ type: 'config', streamOnlyNew: false })
+  })
 })
 

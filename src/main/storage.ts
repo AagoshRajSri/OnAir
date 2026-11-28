@@ -101,10 +101,12 @@ function clampSettings(s: Settings): Settings {
   if (!VALID_TRANSITIONS.has(s.uiTransitionSpeed)) s.uiTransitionSpeed = 'normal'
   s.minimizeOnBlur = Boolean(s.minimizeOnBlur)
   s.cursorHideOnPlay = Boolean(s.cursorHideOnPlay)
+  s.autoScrollOnStream = s.autoScrollOnStream !== false
   s.pauseScrollOnHover = Boolean(s.pauseScrollOnHover)
   s.autoScrollLoop = Boolean(s.autoScrollLoop)
   s.openLastSessionOnStartup = Boolean(s.openLastSessionOnStartup)
   s.openInNewTab = s.openInNewTab !== false
+  s.bridgeStreamOnlyNew = s.bridgeStreamOnlyNew !== false
   s.rsvpOrpColor = clampHex(s.rsvpOrpColor, '#ff5252')
   s.sessionPruneAgeDays = clampNum(s.sessionPruneAgeDays, 0, 90, 7, true)
   if (!isValidBridgeToken(s.bridgeToken)) {

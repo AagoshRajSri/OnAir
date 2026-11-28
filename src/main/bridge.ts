@@ -13,6 +13,7 @@ export interface BridgeConfig {
   port: number
   token: string
   extensionId: string
+  streamOnlyNew?: boolean
 }
 
 export interface BridgeHooks {
@@ -59,6 +60,7 @@ export class BridgeServer {
   private config: BridgeConfig
   private hooks: BridgeHooks
   private authenticatedSockets = new Set<WebSocket>()
+  private configSubscribedSockets = new Set<WebSocket>()
   private allSockets = new Set<WebSocket>()
   private lastSeqById = new Map<string, number>()
   private status: BridgeStatus
@@ -67,7 +69,8 @@ export class BridgeServer {
     this.config = {
       port: config.port,
       token: config.token,
-      extensionId: config.extensionId.trim()
+      extensionId: config.extensionId.trim(),
+      streamOnlyNew: config.streamOnlyNew !== false
     }
     this.hooks = hooks
     this.status = {
@@ -175,6 +178,7 @@ export class BridgeServer {
     }
     this.allSockets.clear()
     this.authenticatedSockets.clear()
+    this.configSubscribedSockets.clear()
 
     if (server) {
       await new Promise<void>((resolve) => {
@@ -196,6 +200,9 @@ export class BridgeServer {
     const nextToken = patch.token !== undefined ? patch.token : this.config.token
     const nextExtId =
       patch.extensionId !== undefined ? patch.extensionId.trim() : this.config.extensionId.trim()
+    const prevStreamOnlyNew = this.config.streamOnlyNew !== false
+    const nextStreamOnlyNew =
+      patch.streamOnlyNew !== undefined ? patch.streamOnlyNew : prevStreamOnlyNew
 
     const portChanged = nextPort !== this.config.port || this.status.state !== 'listening'
     const authChanged = nextToken !== this.config.token || nextExtId !== this.config.extensionId
@@ -203,7 +210,8 @@ export class BridgeServer {
     this.config = {
       port: nextPort,
       token: nextToken,
-      extensionId: nextExtId
+      extensionId: nextExtId,
+      streamOnlyNew: nextStreamOnlyNew
     }
 
     if (portChanged) {
@@ -220,11 +228,26 @@ export class BridgeServer {
       }
       this.allSockets.clear()
       this.authenticatedSockets.clear()
+      this.configSubscribedSockets.clear()
       this.emitStatus({
         ...this.status,
         connectedClients: 0,
         pairedExtensionId: nextExtId
       })
+      return this.getStatus()
+    }
+
+    if (nextStreamOnlyNew !== prevStreamOnlyNew) {
+      const payload = JSON.stringify({ type: 'config', streamOnlyNew: nextStreamOnlyNew })
+      for (const ws of this.configSubscribedSockets) {
+        if (ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(payload)
+          } catch {
+            /* ignore */
+          }
+        }
+      }
     }
 
     return this.getStatus()
@@ -274,6 +297,21 @@ export class BridgeServer {
         authenticated = true
         provider = parsed.provider
         this.authenticatedSockets.add(ws)
+        if (parsed.supportsConfig === true) {
+          this.configSubscribedSockets.add(ws)
+          if (ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(
+                JSON.stringify({
+                  type: 'welcome',
+                  streamOnlyNew: this.config.streamOnlyNew !== false
+                })
+              )
+            } catch {
+              /* ignore */
+            }
+          }
+        }
         this.emitStatus({
           ...this.status,
           connectedClients: this.authenticatedSockets.size
@@ -302,6 +340,7 @@ export class BridgeServer {
     ws.on('close', () => {
       clearTimeout(handshakeTimer)
       this.allSockets.delete(ws)
+      this.configSubscribedSockets.delete(ws)
       if (this.authenticatedSockets.delete(ws) && this.status.state === 'listening') {
         this.emitStatus({
           ...this.status,

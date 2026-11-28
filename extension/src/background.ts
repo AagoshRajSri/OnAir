@@ -5,6 +5,7 @@ const KEEPALIVE_INTERVAL_MS = 20_000
 const RECONNECT_MIN_MS = 2000
 const RECONNECT_MAX_MS = 15_000
 const ENABLED_TABS_KEY = 'enabledTabs'
+const STREAM_ONLY_NEW_KEY = 'bridgeStreamOnlyNew'
 const MENU_TOGGLE_ID = 'onair-toggle-mirror'
 const MENU_SELECTION_ID = 'onair-send-selection'
 const SUPPORTED_URL_PATTERNS = ['https://chatgpt.com/*', 'https://claude.ai/*']
@@ -12,6 +13,7 @@ const SUPPORTED_URL_PATTERNS = ['https://chatgpt.com/*', 'https://claude.ai/*']
 interface StorageConfig {
   bridgePort: number
   bridgeToken: string
+  streamOnlyNew: boolean
 }
 
 interface OutboundContentMessage {
@@ -47,13 +49,14 @@ let connectionState: ConnectionState = 'unconfigured'
 let lastError: string | null = null
 let rejectedAuth = false
 let connectInitiatedByUser = false
-let activeConfig: StorageConfig = { bridgePort: DEFAULT_PORT, bridgeToken: '' }
+let activeConfig: StorageConfig = { bridgePort: DEFAULT_PORT, bridgeToken: '', streamOnlyNew: true }
 let activeProvider: ProviderId | 'selection' = 'chatgpt'
 let keepaliveTimer: ReturnType<typeof setInterval> | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectDelayMs = RECONNECT_MIN_MS
 let idleRetryCount = 0
 let pendingMessage: OutboundContentMessage | null = null
+let pendingIsManual = false
 let menuRegisterSeq = 0
 let sentCount = 0
 let lastSentAt: number | null = null
@@ -68,13 +71,49 @@ function providerFromUrl(url?: string): ProviderId | null {
 }
 
 async function loadConfig(): Promise<StorageConfig> {
-  const res = await chrome.storage.local.get({ bridgePort: DEFAULT_PORT, bridgeToken: '' })
+  const res = await chrome.storage.local.get({
+    bridgePort: DEFAULT_PORT,
+    bridgeToken: '',
+    [STREAM_ONLY_NEW_KEY]: true
+  })
   const port = Number(res.bridgePort)
   activeConfig = {
     bridgePort: Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : DEFAULT_PORT,
-    bridgeToken: typeof res.bridgeToken === 'string' ? res.bridgeToken.trim() : ''
+    bridgeToken: typeof res.bridgeToken === 'string' ? res.bridgeToken.trim() : '',
+    streamOnlyNew: res[STREAM_ONLY_NEW_KEY] !== false
   }
   return activeConfig
+}
+
+async function applyStreamOnlyNewConfig(next: boolean, syncExistingOnDisable: boolean): Promise<void> {
+  activeConfig = { ...activeConfig, streamOnlyNew: next }
+  if (next && pendingMessage && pendingMessage.final && !pendingIsManual) {
+    pendingMessage = null
+    pendingIsManual = false
+  }
+  try {
+    await chrome.storage.local.set({ [STREAM_ONLY_NEW_KEY]: next })
+  } catch {
+    /* ignore */
+  }
+  try {
+    const tabs = await chrome.tabs.query({ url: SUPPORTED_URL_PATTERNS })
+    await Promise.all(
+      tabs.map((tab) =>
+        tab.id !== undefined
+          ? chrome.tabs
+              .sendMessage(tab.id, {
+                type: 'stream-only-new-changed',
+                streamOnlyNew: next,
+                syncExisting: syncExistingOnDisable
+              })
+              .catch(() => {})
+          : Promise.resolve()
+      )
+    )
+  } catch {
+    /* ignore */
+  }
 }
 
 async function getEnabledTabsMap(): Promise<Record<string, boolean>> {
@@ -146,7 +185,12 @@ async function setTabEnabled(tabId: number, enabled: boolean): Promise<boolean> 
   await chrome.storage.session.set({ [ENABLED_TABS_KEY]: map })
   await updateActionBadge(tabId)
   try {
-    await chrome.tabs.sendMessage(tabId, { type: 'tab-enabled-changed', enabled })
+    await loadConfig()
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'tab-enabled-changed',
+      enabled,
+      streamOnlyNew: activeConfig.streamOnlyNew
+    })
     return true
   } catch {
     return false
@@ -246,7 +290,8 @@ async function connectWebSocket(): Promise<void> {
         JSON.stringify({
           type: 'hello',
           token: activeConfig.bridgeToken,
-          provider: activeProvider
+          provider: activeProvider,
+          supportsConfig: true
         })
       )
     } catch {
@@ -263,7 +308,7 @@ async function connectWebSocket(): Promise<void> {
       }
     }, KEEPALIVE_INTERVAL_MS)
 
-    if (pendingMessage) {
+    if (pendingMessage && (!activeConfig.streamOnlyNew || pendingIsManual || !pendingMessage.final)) {
       try {
         ws.send(JSON.stringify(pendingMessage))
         sentCount += 1
@@ -271,15 +316,24 @@ async function connectWebSocket(): Promise<void> {
       } catch {
         /* ignore */
       }
-      pendingMessage = null
     }
+    pendingMessage = null
+    pendingIsManual = false
     void updateActionBadge()
   }
 
   ws.onmessage = (event) => {
     try {
-      const msg = JSON.parse(String(event.data)) as { type?: string }
+      const msg = JSON.parse(String(event.data)) as { type?: string; streamOnlyNew?: boolean }
       if (msg.type === 'pong') return
+      if (msg.type === 'welcome' && typeof msg.streamOnlyNew === 'boolean') {
+        void applyStreamOnlyNewConfig(msg.streamOnlyNew, !msg.streamOnlyNew)
+        return
+      }
+      if (msg.type === 'config' && typeof msg.streamOnlyNew === 'boolean') {
+        const prev = activeConfig.streamOnlyNew
+        void applyStreamOnlyNewConfig(msg.streamOnlyNew, prev && !msg.streamOnlyNew)
+      }
     } catch {
       /* ignore */
     }
@@ -311,7 +365,7 @@ async function connectWebSocket(): Promise<void> {
   }
 }
 
-async function sendToBridge(payload: OutboundContentMessage): Promise<void> {
+async function sendToBridge(payload: OutboundContentMessage, isManual = false): Promise<void> {
   activeProvider = payload.provider
   await loadConfig()
   if (!activeConfig.bridgeToken) {
@@ -331,7 +385,13 @@ async function sendToBridge(payload: OutboundContentMessage): Promise<void> {
     }
   }
 
+  // When "Start fresh" is enabled and OnAir is offline, do not queue already-settled old replies to replay on open
+  if (activeConfig.streamOnlyNew && payload.final && !isManual) {
+    return
+  }
+
   pendingMessage = payload
+  pendingIsManual = isManual
   rejectedAuth = false
   await connectWebSocket()
 }
@@ -378,15 +438,18 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === MENU_SELECTION_ID && info.selectionText) {
     connectInitiatedByUser = true
-    void sendToBridge({
-      type: 'content',
-      id: crypto.randomUUID(),
-      seq: 1,
-      text: info.selectionText,
-      final: true,
-      provider: 'selection',
-      sentAt: performance.timeOrigin + performance.now()
-    })
+    void sendToBridge(
+      {
+        type: 'content',
+        id: crypto.randomUUID(),
+        seq: 1,
+        text: info.selectionText,
+        final: true,
+        provider: 'selection',
+        sentAt: performance.timeOrigin + performance.now()
+      },
+      true
+    )
     return
   }
 
@@ -445,9 +508,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const detected = providerFromUrl(sender.tab?.url)
     if (detected) activeProvider = detected
     const tabId = sender.tab?.id
-    void isTabEnabled(tabId).then((enabled) => {
+    void Promise.all([isTabEnabled(tabId), loadConfig()]).then(([enabled, cfg]) => {
       if (tabId !== undefined) void updateActionBadge(tabId)
-      sendResponse({ enabled })
+      sendResponse({ enabled, streamOnlyNew: cfg.streamOnlyNew })
     })
     return true
   }
@@ -506,6 +569,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         extensionId: chrome.runtime.id,
         port: cfg.bridgePort,
         token: cfg.bridgeToken,
+        streamOnlyNew: cfg.streamOnlyNew,
         tabEnabled,
         contentAttached: Boolean(pingRes?.alive),
         isStreaming: Boolean(pingRes?.isStreaming),
@@ -549,15 +613,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         connectInitiatedByUser = true
         rejectedAuth = false
         manualResendSeq += 1
-        await sendToBridge({
-          type: 'content',
-          id: `${res.reply.id}-manual-${manualResendSeq}`,
-          seq: 1,
-          text: res.reply.text,
-          final: !res.reply.isStreaming,
-          provider: res.provider ?? 'chatgpt',
-          sentAt: performance.timeOrigin + performance.now()
-        })
+        await sendToBridge(
+          {
+            type: 'content',
+            id: `${res.reply.id}-manual-${manualResendSeq}`,
+            seq: 1,
+            text: res.reply.text,
+            final: !res.reply.isStreaming,
+            provider: res.provider ?? 'chatgpt',
+            sentAt: performance.timeOrigin + performance.now()
+          },
+          true
+        )
         sendResponse({ ok: true })
       } catch {
         sendResponse({ ok: false, error: 'Refresh tab (F5) to activate extension.' })

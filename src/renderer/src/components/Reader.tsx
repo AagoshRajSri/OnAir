@@ -88,6 +88,7 @@ export default function Reader({
   const isStreamingRef = useRef(isStreaming)
   isStreamingRef.current = isStreaming
   const finishedScrollKeyRef = useRef<string | null>(null)
+  const userPausedStreamKeyRef = useRef<string | null>(null)
 
   const displayText = useMemo(
     () => (settings.smartReflow && text ? reflowWrappedText(text) : text),
@@ -204,6 +205,7 @@ export default function Reader({
       setSentenceIndex(initial)
       savedScrollTopRef.current = 0
       finishedScrollKeyRef.current = null
+      userPausedStreamKeyRef.current = null
       scrollerRef.current.stop()
       setScrolling(false)
       setShowEnd(false)
@@ -317,18 +319,23 @@ export default function Reader({
 
   const toggleScroll = useCallback(() => {
     if (scrolling) {
+      if (isStreamingRef.current) {
+        userPausedStreamKeyRef.current = scrollSessionKeyRef.current
+      }
       stopScroll()
     } else {
+      userPausedStreamKeyRef.current = null
       finishedScrollKeyRef.current = null
       startScroll()
     }
   }, [scrolling, startScroll, stopScroll])
 
-  // Update active autoscroller speed live without resetting smoothness tracking
+  // Update active autoscroller speed, loop, and live streaming state without resetting smoothness tracking
   useEffect(() => {
     scrollerRef.current.setSpeed(settings.autoScrollSpeed)
     scrollerRef.current.setLoop(settings.autoScrollLoop)
-  }, [settings.autoScrollSpeed, settings.autoScrollLoop])
+    scrollerRef.current.setStreaming(isStreaming)
+  }, [settings.autoScrollSpeed, settings.autoScrollLoop, isStreaming])
 
   // Cleanup autoscroller RAF on unmount
   useEffect(() => {
@@ -336,13 +343,36 @@ export default function Reader({
     return () => scroller.stop()
   }, [])
 
-  // Stop scrolling automatically if switched to RSVP, Page mode, or cleared text;
-  // never auto-start scrolling on its own.
+  // Stop scrolling automatically if switched to RSVP, Page mode, or cleared text
   useEffect(() => {
     if ((settings.pageMode || settings.readingMode === 'rsvp' || !text) && scrollerRef.current.isRunning()) {
       stopScroll()
     }
   }, [settings.pageMode, settings.readingMode, text, stopScroll])
+
+  // Automatically start scrolling the moment an LLM answer begins streaming (when enabled)
+  useEffect(() => {
+    if (
+      isStreaming &&
+      settings.autoScrollOnStream &&
+      !settings.pageMode &&
+      settings.readingMode !== 'rsvp' &&
+      displayText.trim().length > 0 &&
+      userPausedStreamKeyRef.current !== scrollSessionKey &&
+      !scrollerRef.current.isRunning()
+    ) {
+      finishedScrollKeyRef.current = null
+      startScroll()
+    }
+  }, [
+    isStreaming,
+    settings.autoScrollOnStream,
+    settings.pageMode,
+    settings.readingMode,
+    displayText,
+    scrollSessionKey,
+    startScroll
+  ])
 
   const stepSentence = useCallback(
     (delta: 1 | -1) => {

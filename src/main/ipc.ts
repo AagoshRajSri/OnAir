@@ -62,12 +62,14 @@ export function setupIpc(): void {
     if (
       patch.bridgePort !== undefined ||
       patch.bridgeToken !== undefined ||
-      patch.bridgeExtensionId !== undefined
+      patch.bridgeExtensionId !== undefined ||
+      patch.bridgeStreamOnlyNew !== undefined
     ) {
       await updateAppBridgeConfig({
         port: updated.bridgePort,
         token: updated.bridgeToken,
-        extensionId: updated.bridgeExtensionId
+        extensionId: updated.bridgeExtensionId,
+        streamOnlyNew: updated.bridgeStreamOnlyNew
       })
     }
 

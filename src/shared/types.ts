@@ -65,6 +65,7 @@ export interface Settings {
   cursorHideOnPlay: boolean  // hide mouse cursor while teleprompter plays/scrolls
   // ── Scroll & Playback ───────────────────────────────────────
   autoScrollSpeed: number    // 10–400
+  autoScrollOnStream: boolean // automatically start scrolling when an LLM answer begins streaming
   pauseScrollOnHover: boolean
   autoScrollLoop: boolean
   // ── Tabs & Clipboard ────────────────────────────────────────
@@ -89,6 +90,7 @@ export interface Settings {
   bridgePort: number
   bridgeToken: string
   bridgeExtensionId: string
+  bridgeStreamOnlyNew: boolean // skip old settled replies on open/toggle; stream only new answers
   shortcuts: Record<ShortcutId, string>
 }
 
@@ -130,6 +132,7 @@ export const DEFAULT_SETTINGS: Settings = {
   cursorHideOnPlay: false,
   // Scroll
   autoScrollSpeed: 60,
+  autoScrollOnStream: true,
   pauseScrollOnHover: false,
   autoScrollLoop: false,
   // Tabs & Clipboard
@@ -154,6 +157,7 @@ export const DEFAULT_SETTINGS: Settings = {
   bridgePort: 47821,
   bridgeToken: '',
   bridgeExtensionId: '',
+  bridgeStreamOnlyNew: true,
   shortcuts: {
     toggleWindow: 'Ctrl+Alt+R',
     importClipboard: 'Ctrl+Alt+V',

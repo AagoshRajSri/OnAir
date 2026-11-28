@@ -26,7 +26,8 @@ app.whenReady().then(async () => {
     {
       port: settings.bridgePort,
       token: settings.bridgeToken,
-      extensionId: settings.bridgeExtensionId
+      extensionId: settings.bridgeExtensionId,
+      streamOnlyNew: settings.bridgeStreamOnlyNew
     },
     {
       metricsEnabled: isMetricsEnabled,

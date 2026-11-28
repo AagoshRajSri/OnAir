@@ -372,4 +372,80 @@ describe('Content Mirror Controller (Throttle, Seq, Streaming & Idle Finalize)',
     expect(sent[2].seq).toBe(3)
     controller.stop()
   })
+
+  it('skips already-settled replies when streamOnlyNew is enabled and only streams new/live answers', () => {
+    const dom = new JSDOM(
+      `<!doctype html><html><body><main>
+        <div data-message-author-role="user">Old prompt</div>
+        <div data-response-body=""><div data-markdown-text-style="assistant-message"><p>Old completed answer</p></div></div>
+      </main></body></html>`,
+      { url: 'https://chatgpt.com/c/old-session' }
+    )
+    const doc = dom.window.document
+    const sent: ContentBridgeMessage[] = []
+    let fakeNow = 0
+
+    const controller = createMirrorController({
+      adapter: chatgptAdapter,
+      doc,
+      streamOnlyNew: true,
+      sendMessage: (msg) => sent.push(msg),
+      now: () => fakeNow,
+      epochNow: () => 2000 + fakeNow
+    })
+
+    // Turning on mirroring with an old settled reply leaves OnAir fresh & empty
+    controller.start()
+    expect(sent).toHaveLength(0)
+
+    // New prompt starts streaming -> streams immediately
+    const main = doc.querySelector('main')!
+    const u2 = doc.createElement('div')
+    u2.setAttribute('data-message-author-role', 'user')
+    u2.textContent = 'New prompt'
+    const resp2 = doc.createElement('div')
+    resp2.setAttribute('data-response-body', '')
+    const a2 = doc.createElement('div')
+    a2.setAttribute('data-markdown-text-style', 'assistant-message')
+    a2.setAttribute('data-markdown-animated', '')
+    a2.innerHTML = '<p>Fresh live stream</p>'
+    resp2.append(a2)
+    main.append(u2, resp2)
+
+    fakeNow = 100
+    controller.handleMutations()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({
+      text: 'Fresh live stream',
+      final: false,
+      seq: 1
+    })
+
+    // Stream settles
+    a2.removeAttribute('data-markdown-animated')
+    fakeNow = 200
+    controller.handleMutations()
+    expect(sent).toHaveLength(2)
+    expect(sent[1]).toMatchObject({
+      text: 'Fresh live stream',
+      final: true,
+      seq: 2
+    })
+
+    // Turning mirroring off then back on still skips the settled turn while streamOnlyNew=true
+    controller.stop()
+    controller.start()
+    expect(sent).toHaveLength(2)
+
+    // Flipping streamOnlyNew off immediately syncs the latest existing reply
+    controller.setStreamOnlyNew(false, true)
+    expect(sent).toHaveLength(3)
+    expect(sent[2]).toMatchObject({
+      text: 'Fresh live stream',
+      final: true,
+      seq: 3
+    })
+
+    controller.stop()
+  })
 })
