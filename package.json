@@ -1,6 +1,6 @@
 {
   "name": "onair",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OnAir — floating reader companion",
   "main": "./out/main/index.js",
   "author": "OnAir",
