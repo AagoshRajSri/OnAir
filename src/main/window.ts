@@ -9,10 +9,13 @@ import { IPC } from '../shared/types'
 
 const MIN_WIN_WIDTH = 180
 const MIN_WIN_HEIGHT = 110
-const DEFAULT_WIN_WIDTH = 520
-const DEFAULT_WIN_HEIGHT = 280
-// .app-viewport uses padding: 6px 6px 38px 38px, shifting the visible card center +16px right
+const DEFAULT_WIN_WIDTH = 380
+const DEFAULT_WIN_HEIGHT = 180
+// .app-viewport uses padding: 6px 6px 38px 38px:
+// - horizontal card center is shifted +16px right relative to BrowserWindow center
+// - top edge of visible card sits 6px below BrowserWindow.y
 const CARD_CENTER_X_OFFSET = 16
+const CARD_TOP_PAD_OFFSET = 6
 
 let boundsTimer: ReturnType<typeof setTimeout> | null = null
 let mainWin: BrowserWindow | null = null
@@ -35,12 +38,12 @@ export function getMainWindow(): BrowserWindow | null {
 
 /**
  * Position the window top-center on the given workArea so the visible teleprompter card
- * sits dead-center below the webcam and attached cleanly to the top edge.
+ * sits dead-center below the webcam and attached flush to the top edge.
  */
 export function computeTopCenterBounds(
   workArea: Rectangle,
-  width: number,
-  height: number
+  width = DEFAULT_WIN_WIDTH,
+  height = DEFAULT_WIN_HEIGHT
 ): Rectangle {
   const safeW = Math.max(MIN_WIN_WIDTH, Math.round(width))
   const safeH = Math.max(MIN_WIN_HEIGHT, Math.round(height))
@@ -48,21 +51,54 @@ export function computeTopCenterBounds(
   const centeredX = Math.round(workArea.x + (workArea.width - safeW) / 2 - CARD_CENTER_X_OFFSET)
   return {
     x: Math.max(workArea.x, Math.min(maxX, centeredX)),
-    y: workArea.y,
+    y: workArea.y - CARD_TOP_PAD_OFFSET,
     width: safeW,
     height: safeH
   }
 }
 
-function getValidBounds(saved: Settings['bounds'], alwaysOpenAtTopCenter = false): Rectangle {
-  const displays = screen.getAllDisplays()
+function hasDisplayOverlap(rect: Rectangle, displays: Electron.Display[]): boolean {
   const MIN_W_OVERLAP = 100
   const MIN_H_OVERLAP = 40
+  for (const d of displays) {
+    const wa = d.workArea
+    const overlapX = Math.min(rect.x + rect.width, wa.x + wa.width) - Math.max(rect.x, wa.x)
+    const overlapY = Math.min(rect.y + rect.height, wa.y + wa.height) - Math.max(rect.y, wa.y)
+    if (overlapX >= MIN_W_OVERLAP && overlapY >= MIN_H_OVERLAP) {
+      return true
+    }
+  }
+  return false
+}
+
+export function resolveDefaultBounds(
+  defaultBounds: Settings['defaultBounds'],
+  fallbackWorkArea: Rectangle
+): Rectangle {
+  if (defaultBounds) {
+    return {
+      x: Math.round(defaultBounds.x),
+      y: Math.round(defaultBounds.y),
+      width: Math.max(MIN_WIN_WIDTH, Math.round(defaultBounds.width)),
+      height: Math.max(MIN_WIN_HEIGHT, Math.round(defaultBounds.height))
+    }
+  }
+  return computeTopCenterBounds(fallbackWorkArea, DEFAULT_WIN_WIDTH, DEFAULT_WIN_HEIGHT)
+}
+
+function getValidBounds(
+  saved: Settings['bounds'],
+  alwaysOpenAtTopCenter = false,
+  defaultBounds: Settings['defaultBounds'] = null
+): Rectangle {
+  const displays = screen.getAllDisplays()
+  const primaryWa = screen.getPrimaryDisplay().workArea
 
   if (alwaysOpenAtTopCenter) {
-    const w = saved ? Math.max(MIN_WIN_WIDTH, saved.width) : DEFAULT_WIN_WIDTH
-    const h = saved ? Math.max(MIN_WIN_HEIGHT, saved.height) : DEFAULT_WIN_HEIGHT
-    return computeTopCenterBounds(screen.getPrimaryDisplay().workArea, w, h)
+    const candidate = resolveDefaultBounds(defaultBounds, primaryWa)
+    return !defaultBounds || hasDisplayOverlap(candidate, displays)
+      ? candidate
+      : computeTopCenterBounds(primaryWa, candidate.width, candidate.height)
   }
 
   if (saved) {
@@ -72,21 +108,15 @@ function getValidBounds(saved: Settings['bounds'], alwaysOpenAtTopCenter = false
       width: Math.max(MIN_WIN_WIDTH, saved.width),
       height: Math.max(MIN_WIN_HEIGHT, saved.height)
     }
-    for (const d of displays) {
-      const wa = d.workArea
-      const overlapX = Math.min(normalized.x + normalized.width, wa.x + wa.width) - Math.max(normalized.x, wa.x)
-      const overlapY = Math.min(normalized.y + normalized.height, wa.y + wa.height) - Math.max(normalized.y, wa.y)
-      if (overlapX >= MIN_W_OVERLAP && overlapY >= MIN_H_OVERLAP) {
-        return normalized
-      }
+    if (hasDisplayOverlap(normalized, displays)) {
+      return normalized
     }
   }
 
-  return computeTopCenterBounds(
-    screen.getPrimaryDisplay().workArea,
-    DEFAULT_WIN_WIDTH,
-    DEFAULT_WIN_HEIGHT
-  )
+  const fallback = resolveDefaultBounds(defaultBounds, primaryWa)
+  return !defaultBounds || hasDisplayOverlap(fallback, displays)
+    ? fallback
+    : computeTopCenterBounds(primaryWa, fallback.width, fallback.height)
 }
 
 function getAppIcon(): Electron.NativeImage | undefined {
@@ -222,7 +252,11 @@ export function setWindowIgnoreMouse(ignore: boolean): void {
 
 export async function createReaderWindow(): Promise<BrowserWindow> {
   const settings = await loadSettings()
-  const bounds = getValidBounds(settings.bounds, settings.alwaysOpenAtTopCenter)
+  const bounds = getValidBounds(
+    settings.bounds,
+    settings.alwaysOpenAtTopCenter,
+    settings.defaultBounds
+  )
 
   const win = new BrowserWindow({
     x: bounds.x,
@@ -413,8 +447,12 @@ export async function createReaderWindow(): Promise<BrowserWindow> {
       },
       { type: 'separator' },
       {
-        label: 'Snap to camera top-center',
-        click: () => applyWindowSettings(win, { snapTopCenter: true })
+        label: 'Snap to default location',
+        click: () => void applyWindowSettings(win, { snapTopCenter: true })
+      },
+      {
+        label: 'Save current size & location as default',
+        click: () => void applyWindowSettings(win, { captureDefaultBounds: true })
       },
       {
         label: s.locked ? 'Unlock from screen' : 'Lock on screen',
@@ -468,7 +506,10 @@ export function deliverContentToWindow(
   }
 }
 
-export function applyWindowSettings(win: BrowserWindow, payload: WindowApplyPayload): void {
+export async function applyWindowSettings(
+  win: BrowserWindow,
+  payload: WindowApplyPayload
+): Promise<void> {
   if (win.isDestroyed()) return
 
   if (payload.hidden !== undefined) {
@@ -503,19 +544,37 @@ export function applyWindowSettings(win: BrowserWindow, payload: WindowApplyPayl
     return
   }
 
+  if (payload.captureDefaultBounds) {
+    const cur = win.getNormalBounds()
+    const s = await loadSettings()
+    const updated: Settings = { ...s, defaultBounds: cur }
+    await saveSettings(updated)
+    if (!win.isDestroyed()) {
+      win.webContents.send(IPC.settingsUpdated, updated)
+      win.webContents.send(IPC.toast, `Default saved (${cur.width}×${cur.height})`)
+    }
+    return
+  }
+
   if (payload.snapTopCenter) {
     if (win.isMaximized()) {
       win.unmaximize()
     }
+    if (boundsTimer) {
+      clearTimeout(boundsTimer)
+      boundsTimer = null
+    }
     const cur = win.getNormalBounds()
     const display = screen.getDisplayMatching(cur)
-    const target = computeTopCenterBounds(
-      display.workArea,
-      Math.max(MIN_WIN_WIDTH, cur.width),
-      Math.max(MIN_WIN_HEIGHT, cur.height)
-    )
+    const s = await loadSettings()
+    const displays = screen.getAllDisplays()
+    let target = resolveDefaultBounds(s.defaultBounds, display.workArea)
+    if (s.defaultBounds && !hasDisplayOverlap(target, displays)) {
+      target = computeTopCenterBounds(display.workArea, target.width, target.height)
+    }
     win.setBounds(target)
-    persistCurrentBounds()
+    s.bounds = target
+    await saveSettings(s)
     return
   }
 

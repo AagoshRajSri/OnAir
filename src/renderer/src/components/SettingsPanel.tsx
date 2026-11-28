@@ -721,8 +721,8 @@ export default function SettingsPanel({
       </Row>
 
       <Row
-        label="Always open at camera top-center"
-        hint="On every launch, opens centered at the top edge below your camera instead of your last position."
+        label="Always open at default location &amp; size"
+        hint="On every launch, opens at your custom default bounds (or camera top-center if unset) instead of your last position."
       >
         <Toggle
           checked={settings.alwaysOpenAtTopCenter}
@@ -733,15 +733,73 @@ export default function SettingsPanel({
         />
       </Row>
 
-      <Row label="Default camera position" hint="Moves OnAir right under your webcam at the top center of the screen.">
-        <button
-          type="button"
-          className="sp-btn"
-          onClick={() => window.api.windowApply({ snapTopCenter: true })}
-        >
-          Snap to top-center
-        </button>
-      </Row>
+      <p className="sp-section-title">Default Location &amp; Size</p>
+      <div className="sp-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+          <span className="sp-label" style={{ flex: '1 1 120px', fontSize: 11, color: 'var(--ui-text-muted)' }}>
+            {settings.defaultBounds
+              ? `Custom: ${settings.defaultBounds.width}×${settings.defaultBounds.height} at (${settings.defaultBounds.x}, ${settings.defaultBounds.y})`
+              : 'Built-in: Camera top-center (380×180)'}
+          </span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, flexShrink: 0 }}>
+            <button
+              type="button"
+              className="sp-btn accent"
+              onClick={() => window.api.windowApply({ captureDefaultBounds: true })}
+              title="Save current window position and size as default"
+            >
+              Use Current
+            </button>
+            <button
+              type="button"
+              className="sp-btn"
+              onClick={() => window.api.windowApply({ snapTopCenter: true })}
+              title="Move and resize window to default"
+            >
+              Snap
+            </button>
+            {settings.defaultBounds && (
+              <button
+                type="button"
+                className="sp-btn"
+                onClick={() => onChange({ defaultBounds: null })}
+                title="Reset to built-in camera top-center default"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+        {settings.defaultBounds && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+            {(['width', 'height', 'x', 'y'] as const).map((field) => (
+              <label key={field} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--ui-text-dim)' }}>
+                <span style={{ textTransform: 'uppercase', width: 10 }}>{field[0]}</span>
+                <input
+                  type="number"
+                  className="sp-input"
+                  style={{ width: '100%', minWidth: 0, padding: '2px 5px', fontSize: 10.5 }}
+                  value={settings.defaultBounds![field]}
+                  min={field === 'width' ? 180 : field === 'height' ? 110 : undefined}
+                  onChange={(e) => {
+                    const num = Number(e.target.value)
+                    if (!Number.isFinite(num) || !settings.defaultBounds) return
+                    const clamped =
+                      field === 'width'
+                        ? Math.max(180, Math.min(3840, Math.round(num)))
+                        : field === 'height'
+                          ? Math.max(110, Math.min(2160, Math.round(num)))
+                          : Math.round(num)
+                    onChange({
+                      defaultBounds: { ...settings.defaultBounds, [field]: clamped }
+                    })
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
 
       <Row label="Lock on screen" hint="Keeps OnAir pinned on top until closed or toggled with the shortcut, while keeping drag, resize, and drop active.">
         <Toggle checked={settings.locked} onChange={(v) => {

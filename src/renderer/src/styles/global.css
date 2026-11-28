@@ -101,7 +101,7 @@ body,
   color: var(--text-color);
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.72);
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -217,14 +217,13 @@ body,
   justify-content: center;
   background: #141417;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
   color: #a1a1aa;
   cursor: grab;
   opacity: 1;
   padding: 0;
   outline: none;
   z-index: 80;
-  transition: background var(--ui-transition), color var(--ui-transition), border-color var(--ui-transition), transform var(--ui-transition);
+  transition: background var(--ui-transition), color var(--ui-transition), border-color var(--ui-transition), transform var(--ui-transition), opacity var(--ui-transition);
 }
 
 .ext-drag-btn:hover {
@@ -928,15 +927,27 @@ textarea {
   background: var(--ui-surface);
   border-left: 1px solid var(--ui-border);
   color: var(--ui-text);
-  width: min(320px, 100vw);
+  width: min(320px, 100%);
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 14px 14px 24px;
   font-family: var(--ui-font);
   font-size: 11.5px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
   animation: panel-slide-in var(--ui-transition);
+}
+
+.settings-panel::-webkit-scrollbar {
+  width: 4px;
+}
+
+.settings-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 2px;
 }
 
 @keyframes panel-slide-in {
@@ -1295,21 +1306,11 @@ textarea {
   padding: 2px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  scrollbar-width: none;
 }
 
 .sp-nav::-webkit-scrollbar {
-  height: 3px;
-}
-
-.sp-nav::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.sp-nav::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
-  border-radius: 2px;
+  display: none;
 }
 
 .sp-nav-btn {
@@ -1853,9 +1854,19 @@ textarea {
 
 @media (max-width: 360px) {
   .settings-panel {
-    width: 100vw;
+    width: 100%;
     border-left: none;
-    padding: 12px 12px 20px;
+    padding: 10px 10px 18px;
+  }
+
+  .sp-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .sp-select,
+  .sp-input {
+    max-width: 100%;
   }
 
   .empty-state {
@@ -1899,87 +1910,116 @@ textarea {
   opacity: 0.28;
 }
 
-.compact-top-chrome {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 50;
-  background: rgba(12, 12, 14, 0.9);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
-  animation: toolbar-slide-in var(--ui-transition);
+/* Exterior side & bottom docks attached outside the card when hovered in micro mode */
+.ext-side-dock {
+  -webkit-app-region: no-drag;
+  position: fixed;
+  left: 4px;
+  top: 4px;
+  bottom: 38px;
+  width: 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 0;
+  background: #141417;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  z-index: 80;
+  animation: ext-dock-in var(--ui-transition);
 }
 
-.compact-shell .toolbar {
-  height: 26px;
-  padding: 0 4px;
-  background: transparent;
-  animation: none;
-}
-
-.compact-shell .toolbar .tb-sep {
+.ext-side-dock::-webkit-scrollbar {
   display: none;
 }
 
-.compact-shell .toolbar button {
-  padding: 3px;
-}
-
-.compact-shell .toolbar .tb-icon {
-  width: 12px;
-  height: 12px;
-}
-
-.compact-shell .tb-spacer {
-  min-width: 0;
-}
-
-.compact-shell .tab-bar {
-  height: 22px;
-  padding: 2px 6px;
-  background: transparent;
-}
-
-.compact-shell .tab-item {
-  height: 17px;
-  max-width: 96px;
-  padding: 0 5px 0 6px;
-  font-size: 10px;
-}
-
-.reader-nav-bar.compact-nav-overlay {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 24px;
+.ext-bottom-dock {
+  -webkit-app-region: no-drag;
+  position: fixed;
+  left: 40px;
+  right: 6px;
+  bottom: 4px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   padding: 0 6px;
-  z-index: 50;
-  background: rgba(12, 12, 14, 0.9);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.55);
-  animation: compact-nav-in var(--ui-transition);
+  background: #141417;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  z-index: 80;
+  animation: ext-dock-in var(--ui-transition);
 }
 
-@keyframes compact-nav-in {
+.ext-bottom-dock::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes ext-dock-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: scale(0.95);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: scale(1);
   }
 }
 
-.compact-nav-overlay .reader-nav-btn {
-  padding: 2px 5px;
-  font-size: 10px;
+.ext-dock-btn {
+  -webkit-app-region: no-drag;
+  background: none;
+  border: none;
+  color: #a1a1aa;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--ui-font);
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background var(--ui-transition), color var(--ui-transition);
 }
 
-.compact-nav-overlay .reader-nav-count {
+.ext-dock-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f4f4f5;
+}
+
+.ext-dock-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.ext-dock-btn.active-lock {
+  color: var(--ui-accent);
+  background: var(--ui-accent-dim);
+}
+
+.ext-dock-btn.close:hover {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.22);
+}
+
+.ext-dock-count {
+  font-family: var(--ui-font);
   font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-text-muted);
+  white-space: nowrap;
+  padding: 0 2px;
+  flex-shrink: 0;
 }
 
 .empty-state.compact {

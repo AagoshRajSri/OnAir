@@ -88,6 +88,7 @@ export interface Settings {
   ollamaUrl: string
   // ── System ──────────────────────────────────────────────────
   bounds: { x: number; y: number; width: number; height: number } | null
+  defaultBounds: { x: number; y: number; width: number; height: number } | null
   bridgePort: number
   bridgeToken: string
   bridgeExtensionId: string
@@ -156,6 +157,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ollamaUrl: 'http://127.0.0.1:11434',
   // System
   bounds: null,
+  defaultBounds: null,
   bridgePort: 47821,
   bridgeToken: '',
   bridgeExtensionId: '',
@@ -296,6 +298,7 @@ export interface WindowApplyPayload {
   toggleMaximize?: boolean
   close?: boolean
   snapTopCenter?: boolean
+  captureDefaultBounds?: boolean
   sizePreset?: 'Column' | 'Compact' | 'Wide' | 'Stage'
 }
 

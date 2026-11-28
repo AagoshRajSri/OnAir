@@ -63,6 +63,25 @@ function clampHex(val: unknown, fallback: string): string {
   return typeof val === 'string' && /^#[0-9a-fA-F]{6}$/.test(val) ? val : fallback
 }
 
+function clampBoundsRect(
+  val: unknown
+): { x: number; y: number; width: number; height: number } | null {
+  if (!val || typeof val !== 'object') return null
+  const r = val as Record<string, unknown>
+  const x = typeof r.x === 'number' && Number.isFinite(r.x) ? Math.round(r.x) : null
+  const y = typeof r.y === 'number' && Number.isFinite(r.y) ? Math.round(r.y) : null
+  const width =
+    typeof r.width === 'number' && Number.isFinite(r.width)
+      ? Math.max(180, Math.min(3840, Math.round(r.width)))
+      : null
+  const height =
+    typeof r.height === 'number' && Number.isFinite(r.height)
+      ? Math.max(110, Math.min(2160, Math.round(r.height)))
+      : null
+  if (x === null || y === null || width === null || height === null) return null
+  return { x, y, width, height }
+}
+
 const VALID_TEXT_ALIGNS = new Set<Settings['textAlign']>(['left', 'center', 'right', 'justify'])
 const VALID_TOOLBAR_MODES = new Set<Settings['toolbarMode']>(['hover', 'always', 'minimal'])
 const VALID_TRANSITIONS = new Set<Settings['uiTransitionSpeed']>(['none', 'fast', 'normal', 'slow'])
@@ -101,6 +120,7 @@ function clampSettings(s: Settings): Settings {
   if (!VALID_TRANSITIONS.has(s.uiTransitionSpeed)) s.uiTransitionSpeed = 'normal'
   s.alwaysOnTop = s.alwaysOnTop !== false
   s.alwaysOpenAtTopCenter = Boolean(s.alwaysOpenAtTopCenter)
+  s.defaultBounds = clampBoundsRect(s.defaultBounds)
   s.minimizeOnBlur = Boolean(s.minimizeOnBlur)
   s.cursorHideOnPlay = Boolean(s.cursorHideOnPlay)
   s.autoScrollOnStream = s.autoScrollOnStream !== false

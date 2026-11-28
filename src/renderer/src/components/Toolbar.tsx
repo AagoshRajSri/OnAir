@@ -191,8 +191,8 @@ export default function Toolbar({
 
       <button
         onClick={onSnapTopCenter}
-        title="Snap to default location (top-center below camera)"
-        aria-label="Snap to camera top-center"
+        title="Snap to default location & size"
+        aria-label="Snap to default location and size"
       >
         <IconTopCenter />
         <span className="tb-label">Top</span>

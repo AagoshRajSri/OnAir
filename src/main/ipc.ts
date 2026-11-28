@@ -148,7 +148,7 @@ export function setupIpc(): void {
 
   ipcMain.handle(IPC.windowApply, async (_e, payload: WindowApplyPayload) => {
     const win = getMainWindow()
-    if (win) applyWindowSettings(win, payload)
+    if (win) await applyWindowSettings(win, payload)
   })
 
   ipcMain.on(IPC.windowDragStart, () => {

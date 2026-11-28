@@ -13,7 +13,6 @@ interface RsvpViewProps {
   responsiveScale: boolean
   windowHeight: number
   compactMode?: boolean
-  compactHovered?: boolean
   cursorHideOnPlay?: boolean
   commandEvent: { cmd: ShortcutId; seq: number } | null
   onWpmChange: (nextWpm: number) => void
@@ -33,7 +32,6 @@ export default function RsvpView({
   responsiveScale,
   windowHeight,
   compactMode = false,
-  compactHovered = false,
   cursorHideOnPlay = false,
   commandEvent,
   onWpmChange,
@@ -291,7 +289,7 @@ export default function RsvpView({
   const current = tokens[clampedIdx]
   const progressRatio = tokens.length > 1 ? clampedIdx / (tokens.length - 1) : 1
   const remainingSec = estimateRemainingSeconds(tokens.length, progressRatio, wpm)
-  const showNavBar = compactMode ? compactHovered : windowHeight >= 72
+  const showNavBar = !compactMode && windowHeight >= 72
   const isWide = !compactMode && stageSize.width >= 540
   const showReticle = stageSize.height >= 95
 

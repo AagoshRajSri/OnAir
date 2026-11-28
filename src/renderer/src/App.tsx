@@ -145,6 +145,7 @@ export default function App(): ReactElement {
   const pageModeRef = useRef(settings.pageMode)
   const appShellRef = useRef<HTMLDivElement | null>(null)
   const tabBarRef = useRef<HTMLDivElement | null>(null)
+  const hoverLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const cmdSeq = useRef(0)
   const draggingWinRef = useRef(false)
@@ -155,6 +156,32 @@ export default function App(): ReactElement {
     if (ignoreMouseRef.current === ignore) return
     ignoreMouseRef.current = ignore
     window.api?.windowSetIgnoreMouse(ignore)
+  }, [])
+
+  const enterChromeHover = useCallback((): void => {
+    if (hoverLeaveTimerRef.current !== null) {
+      clearTimeout(hoverLeaveTimerRef.current)
+      hoverLeaveTimerRef.current = null
+    }
+    setShowToolbar(true)
+  }, [])
+
+  const scheduleLeaveChromeHover = useCallback((): void => {
+    if (hoverLeaveTimerRef.current !== null) {
+      clearTimeout(hoverLeaveTimerRef.current)
+    }
+    hoverLeaveTimerRef.current = setTimeout(() => {
+      hoverLeaveTimerRef.current = null
+      setShowToolbar(false)
+    }, 160)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (hoverLeaveTimerRef.current !== null) {
+        clearTimeout(hoverLeaveTimerRef.current)
+      }
+    }
   }, [])
 
   tabsRef.current = tabs
@@ -1167,14 +1194,12 @@ export default function App(): ReactElement {
     !isEditing &&
     (shellSize.width < 320 || shellSize.height < 200)
 
-  const shouldShowToolbar = isCompactShell
-    ? showToolbar
-    : windowHeight >= 100 &&
-      (settings.toolbarMode === 'always' || (settings.toolbarMode === 'hover' && showToolbar))
+  const shouldShowToolbar =
+    !isCompactShell &&
+    windowHeight >= 100 &&
+    (settings.toolbarMode === 'always' || (settings.toolbarMode === 'hover' && showToolbar))
 
-  const shouldShowTabBar = isCompactShell
-    ? tabs.length > 1 && showToolbar && shellSize.height >= 136
-    : tabs.length > 0 && windowHeight >= 100
+  const shouldShowTabBar = !isCompactShell && tabs.length > 0 && windowHeight >= 100
 
   const topChromeContent = (
     <>
@@ -1277,8 +1302,8 @@ export default function App(): ReactElement {
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        onMouseEnter={() => setShowToolbar(true)}
-        onMouseLeave={() => setShowToolbar(false)}
+        onMouseEnter={enterChromeHover}
+        onMouseLeave={scheduleLeaveChromeHover}
       >
         {!isMaximized &&
           (['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'] as const).map((edge) => (
@@ -1313,14 +1338,8 @@ export default function App(): ReactElement {
           {settings.clipboardWatch && <div className="watch-dot" />}
         </div>
 
-        {/* In compact mode, float top chrome only on hover so underlying text never reflows/jumps */}
-        {isCompactShell ? (
-          (shouldShowToolbar || shouldShowTabBar) && (
-            <div className="compact-top-chrome">{topChromeContent}</div>
-          )
-        ) : (
-          topChromeContent
-        )}
+        {/* Standard top chrome when window is large enough; compact mode shifts controls outside */}
+        {!isCompactShell && topChromeContent}
 
         {/* Reader or live dynamic edit textarea */}
         {isEditing ? (
@@ -1441,12 +1460,114 @@ export default function App(): ReactElement {
         {toast && <div className="toast">{toast}</div>}
       </div>
 
+      {/* Exterior side & bottom docks when extremely small and hovered (never obscures teleprompter text) */}
+      {isCompactShell && showToolbar && (
+        <>
+          <div
+            className="ext-side-dock"
+            onMouseEnter={enterChromeHover}
+            onMouseLeave={scheduleLeaveChromeHover}
+          >
+            <button
+              type="button"
+              className="ext-dock-btn"
+              title="Maximize / Enlarge"
+              aria-label="Maximize window"
+              onClick={() => window.api.windowApply({ toggleMaximize: true })}
+            >
+              □
+            </button>
+            <button
+              type="button"
+              className="ext-dock-btn"
+              title="Snap to default location & size"
+              aria-label="Snap to default location and size"
+              onClick={() => window.api.windowApply({ snapTopCenter: true })}
+            >
+              ⌂
+            </button>
+            <button
+              type="button"
+              className="ext-dock-btn"
+              title="Settings"
+              aria-label="Settings"
+              onClick={() => setShowSettings(true)}
+            >
+              ⚙
+            </button>
+            <button
+              type="button"
+              className={`ext-dock-btn${settings.locked ? ' active-lock' : ''}`}
+              title={settings.locked ? 'Unlock from screen' : 'Lock on screen'}
+              aria-label="Toggle lock"
+              onClick={handleToggleLock}
+            >
+              {settings.locked ? '🔒' : '🔓'}
+            </button>
+            <button
+              type="button"
+              className="ext-dock-btn close"
+              title="Close"
+              aria-label="Close window"
+              onClick={() => window.api.windowApply({ close: true })}
+            >
+              ✕
+            </button>
+          </div>
+          <div
+            className="ext-bottom-dock"
+            onMouseEnter={enterChromeHover}
+            onMouseLeave={scheduleLeaveChromeHover}
+          >
+            <button
+              type="button"
+              className="ext-dock-btn"
+              aria-label="Previous answer"
+              title="Previous answer"
+              disabled={currentTabIndex <= 0}
+              onClick={() => stepAnswer(-1)}
+            >
+              ←
+            </button>
+            <span className="ext-dock-count">
+              {tabs.length > 0 && currentTabIndex >= 0 ? `${currentTabIndex + 1}/${tabs.length}` : '0/0'}
+            </span>
+            <button
+              type="button"
+              className="ext-dock-btn"
+              aria-label="Next answer"
+              title="Next answer"
+              disabled={currentTabIndex < 0 || currentTabIndex >= tabs.length - 1}
+              onClick={() => stepAnswer(1)}
+            >
+              →
+            </button>
+            {!settings.pageMode && (
+              <button
+                type="button"
+                className="ext-dock-btn"
+                aria-label="Toggle scroll"
+                title="Play / Pause scroll (Space)"
+                onClick={() => {
+                  cmdSeq.current += 1
+                  setCommandEvent({ cmd: 'toggleScroll', seq: cmdSeq.current })
+                }}
+              >
+                ⏯
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Exterior circular drag handle positioned in the bottom-left exterior angle */}
       {!isMaximized && (
         <button
           type="button"
           className="ext-drag-btn"
           aria-label="Drag to move window"
+          onMouseEnter={enterChromeHover}
+          onMouseLeave={scheduleLeaveChromeHover}
           onPointerDown={(e) => {
             if (e.button !== 0) return
             e.preventDefault()

@@ -538,7 +538,6 @@ export default function Reader({
         responsiveScale={settings.responsiveScale}
         windowHeight={windowHeight}
         compactMode={compactMode}
-        compactHovered={compactHovered}
         cursorHideOnPlay={settings.cursorHideOnPlay}
         commandEvent={commandEvent}
         onWpmChange={(nextWpm) => onSettingsChange({ rsvpWpm: nextWpm })}
@@ -548,7 +547,7 @@ export default function Reader({
   }
 
   if (!text) {
-    const showEmptyNav = compactMode ? tabCount > 1 && compactHovered : tabCount > 1 && windowHeight >= 72
+    const showEmptyNav = !compactMode && tabCount > 1 && windowHeight >= 72
     return (
       <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div
@@ -609,9 +608,7 @@ export default function Reader({
     )
   }
 
-  const showNavBar = compactMode
-    ? (tabCount > 0 || hasContent) && compactHovered
-    : (tabCount > 0 || hasContent) && windowHeight >= 72
+  const showNavBar = !compactMode && (tabCount > 0 || hasContent) && windowHeight >= 72
   const isBionic = settings.readingMode === 'bionic'
   const hideStageCursor = settings.cursorHideOnPlay && (scrolling || isStreaming)
   const isMediumWidth = showMediumMetrics
